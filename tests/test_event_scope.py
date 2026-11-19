@@ -179,3 +179,10 @@ def test_region_headline_with_only_other_towns_is_not_house_notice():
         "Дніпропетровщина: екстрені відключення у деяких містах",
     )
     assert all(not covers_house(item, FULL) for item in examples)
+
+
+def test_named_other_towns_in_plural_is_not_whole_oblast():
+    assert not covers_house(
+        "Дніпропетровщина: запроваджено екстрені відключення "
+        "у містах Нікополь та Павлоград", FULL
+    )

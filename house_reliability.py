@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ALLOWED = (5, 15, 30, 60)
-GRACE_SECONDS = 60
+GRACE_SECONDS = 240
 
 
 def parse_reminder_minutes(raw: str | None) -> tuple[int, ...]:
@@ -33,7 +33,7 @@ def parse_reminder_minutes(raw: str | None) -> tuple[int, ...]:
 
 def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
                   state: dict, parse_verified) -> list[tuple[str, str, datetime]]:
-    """Messages only inside strict one-minute grace after desired due time.
+    """Best-effort notices up to four minutes after their nominal due time.
 
     No weekly forecasts, unknown slots or possible ('maybe') outages.
     The source must contain complete current daily GPV facts.

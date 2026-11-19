@@ -655,3 +655,26 @@ def test_transition_from_emergency_to_gpv_closes_prior_status():
     notices = [x for x in scoped_candidates(page, active, NOW) if x[3]]
     assert len(notices) == 1
     assert notices[0][2]["status"] == "ended"
+
+
+def test_edit_of_prior_official_post_without_time_still_reported():
+    state = {"official:last_id": 300}
+    first = html_page([fake_post(
+        301, "Дніпропетровщина: запроваджено екстрені відключення "
+             "на території Дніпропетровської області")])
+    for _pid, key, value, _msg in scoped_candidates(first, state, NOW):
+        state[key] = value
+    revised = html_page([fake_post(
+        301, "Дніпропетровщина: запроваджено екстрені відключення "
+             "по всій території Дніпропетровської області")])
+    messages = [x[3] for x in scoped_candidates(revised, state, NOW) if x[3]]
+    assert len(messages) == 1
+    assert "змінив офіційне повідомлення" in messages[0].casefold()
+
+
+def test_untrusted_hash_state_does_not_crash_monitor():
+    state = {"official:last_id": 400,
+             "official:post_hashes": {"invalid": "hash"}}
+    page = html_page([fake_post(
+        401, "Дніпропетровщина: екстрені відключення запроваджено")])
+    assert [row for row in scoped_candidates(page, state, NOW) if row[3]]

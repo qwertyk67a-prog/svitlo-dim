@@ -150,7 +150,10 @@ def regional_message(event, changed=False):
         body = ("Відключення можуть відбуватися поза погодинним графіком." if active else
                 "Це повідомлення про територію, а не підтвердження відновлення у будинку.")
 
-    if changed and active:
+    if changed == "publication" and active:
+        title = "🔄 <b>ДТЕК змінив офіційне повідомлення</b>"
+        body = "Змінено текст першоджерела. Час відключення міг залишитися незмінним."
+    elif changed and active:
         title = "🔄 <b>ДТЕК уточнив строки відключення</b>"
         body = "Офіційні дані про час події оновлено."
     coverage = event.get("coverage") or {}
@@ -368,18 +371,27 @@ def region_candidates(page, state, now, scope=None):
                 and current["content_hash"] != shadow.get("content_hash")
                 and current["source"] != shadow.get("source")
             )
-            if updated_time or fresh_activation:
+            edited_post = bool(
+                isinstance(shadow, dict)
+                and current["source"] == shadow.get("source")
+                and current["content_hash"] != shadow.get("content_hash")
+            )
+            if updated_time or fresh_activation or edited_post:
                 pending.append((
                     post_id, key, current,
-                    regional_message(event, changed=True),
+                    regional_message(
+                        event, changed="publication"
+                        if edited_post and not updated_time else True
+                    ),
                 ))
                 shadow = current
 
     # A content hash stores a publication version, never private house data.
     # Keep the most recent 100 visible posts, not an unbounded public history.
+    visible_keys = [k for k in hashes if str(k).isdigit()]
     limited_hashes = {
-        k: hashes[k] for k in sorted(hashes, key=lambda x: int(x))[-100:]
-        if str(k).isdigit()
+        k: hashes[k] for k in
+        sorted(visible_keys, key=lambda x: int(x))[-100:]
     }
     if first_run and not pending:
         state["official:last_id"] = max_id
