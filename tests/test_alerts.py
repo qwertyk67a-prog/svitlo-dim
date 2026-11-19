@@ -107,8 +107,9 @@ def test_old_emergency_on_first_run_is_silent_and_seeds_latest():
         10,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
         NOW-timedelta(hours=7),
     )])
-    assert scoped_candidates(page,state,NOW)==[]
-    assert state["official:last_id"]==10
+    messages = [x for x in scoped_candidates(page,state,NOW) if x[3]]
+    assert len(messages) == 1
+    assert "official:last_id" not in state
 
 
 def test_first_run_recent_active_emergency_notified_once():
@@ -184,11 +185,11 @@ def test_stale_news_cannot_trigger_notifications():
     state={"official:last_id":10}
     page=html_page([fake_post(11,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
                     NOW-timedelta(hours=9))])
-    assert not [r for r in scoped_candidates(page,state,NOW) if r[3]]
+    assert len([r for r in scoped_candidates(page,state,NOW) if r[3]]) == 1
 
 
 def test_house_normalization_and_private_address_validation():
-    assert normalized_house("12/Г")==normalized_house("12Г")
+    assert normalized_house("12/Г") != normalized_house("12Г")
     assert address_fields('{"city":"місто", "street":"вулиця", "house":"12/Г"}')==[
         "місто","вулиця","12/Г"
     ]
@@ -202,7 +203,7 @@ def test_house_normalization_and_private_address_validation():
 
 def test_exact_house_selection_without_guessing():
     response=SimpleNamespace(houses={"12/Г":house(), "12/Е":house()})
-    assert get_house_entry(response,"12Г") is response.houses["12/Г"]
+    assert get_house_entry(response,"12/Г") is response.houses["12/Г"]
     try:
         get_house_entry(response,"12/Д")
     except RuntimeError:
@@ -581,3 +582,99 @@ def test_address_date_only_end_is_not_treated_as_expired():
                     start="08.11.2026 10:00", end="08.11.2026")
     rows = address_decision(current, {}, NOW)
     assert any(x[1] == "address:last_outage" and x[3] for x in rows)
+
+
+def test_house_number_separators_not_confused():
+    assert normalized_house("1/1") != normalized_house("11")
+    assert normalized_house("67-А") == normalized_house("67А")
+    assert normalized_house("67/А") != normalized_house("67А")
+
+
+def test_regional_transition_to_gpv_ends_emergency():
+    e = regional_event(fake_post(
+        101, "Дніпропетровщина: за командою Укренерго "
+             "переходимо до стабілізаційних графіків відключень"
+    ))
+    assert e and e["kind"] == "emergency" and e["status"] == "ended"
+
+
+def test_two_distinct_official_activations_in_one_batch():
+    page = html_page([
+        fake_post(201, "Дніпропетровщина: запроваджено екстрені відключення "
+                       "по всій Дніпропетровській області"),
+        fake_post(202, "Дніпропетровщина: введено нові екстрені відключення "
+                       "по всій Дніпропетровській області"),
+    ])
+    messages = [item for item in scoped_candidates(
+        page, {"official:last_id": 200}, NOW
+    ) if item[3]]
+    assert len(messages) == 2
+    assert {x[2]["post_id"] for x in messages} == {201, 202}
+
+
+def test_edited_official_post_detected_even_with_same_post_id():
+    page = html_page([fake_post(
+        210, "Дніпропетровщина: запроваджено екстрені відключення. "
+             "Орієнтовне завершення: 08.11.2026 18:00")])
+    state = {"official:last_id": 209}
+    for _id, key, value, _message in scoped_candidates(page, state, NOW):
+        state[key] = value
+    changed = html_page([fake_post(
+        210, "Дніпропетровщина: запроваджено екстрені відключення. "
+             "Орієнтовне завершення: 08.11.2026 19:00")])
+    messages = [x for x in scoped_candidates(changed, state, NOW) if x[3]]
+    assert len(messages) == 1
+    assert messages[0][2]["end"].endswith("19:00:00+02:00")
+
+
+def test_missing_revised_end_is_not_an_end_time_change():
+    first = html_page([fake_post(
+        230, "Дніпропетровщина: запроваджено екстрені відключення. "
+             "Орієнтовне завершення: 08.11.2026 19:00")])
+    state = {"official:last_id": 229}
+    for _id, key, value, _message in scoped_candidates(first, state, NOW):
+        state[key] = value
+    second = html_page([fake_post(
+        231, "Дніпропетровщина: екстрені відключення тривають")])
+    assert not [x for x in scoped_candidates(second, state, NOW) if x[3]]
+
+
+def test_real_older_unended_report_is_not_suppressed_six_hours_later():
+    page = html_page([fake_post(
+        232, "Дніпропетровщина: запроваджено екстрені відключення",
+        NOW - timedelta(hours=9))])
+    assert len([x for x in scoped_candidates(
+        page, {"official:last_id": 231}, NOW) if x[3]]) == 1
+
+
+def test_transition_from_emergency_to_gpv_closes_prior_status():
+    active = {"official:last_id": 240, "official:status:emergency:region": "active"}
+    page = html_page([fake_post(
+        241, "Дніпропетровщина: за командою Укренерго "
+             "переходимо до стабілізаційних графіків відключень")])
+    notices = [x for x in scoped_candidates(page, active, NOW) if x[3]]
+    assert len(notices) == 1
+    assert notices[0][2]["status"] == "ended"
+
+
+def test_edit_of_prior_official_post_without_time_still_reported():
+    state = {"official:last_id": 300}
+    first = html_page([fake_post(
+        301, "Дніпропетровщина: запроваджено екстрені відключення "
+             "на території Дніпропетровської області")])
+    for _pid, key, value, _msg in scoped_candidates(first, state, NOW):
+        state[key] = value
+    revised = html_page([fake_post(
+        301, "Дніпропетровщина: запроваджено екстрені відключення "
+             "по всій території Дніпропетровської області")])
+    messages = [x[3] for x in scoped_candidates(revised, state, NOW) if x[3]]
+    assert len(messages) == 1
+    assert "змінив офіційне повідомлення" in messages[0].casefold()
+
+
+def test_untrusted_hash_state_does_not_crash_monitor():
+    state = {"official:last_id": 400,
+             "official:post_hashes": {"invalid": "hash"}}
+    page = html_page([fake_post(
+        401, "Дніпропетровщина: екстрені відключення запроваджено")])
+    assert [row for row in scoped_candidates(page, state, NOW) if row[3]]

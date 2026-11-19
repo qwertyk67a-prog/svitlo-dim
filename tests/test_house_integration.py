@@ -33,6 +33,7 @@ def setup(monkeypatch,path):
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
     monkeypatch.setenv("REMINDER_MINUTES","0")
     monkeypatch.delenv("DTEK_ADDRESS_JSON",raising=False)
+    monkeypatch.setenv("ALLOW_UNVERIFIED_GROUP","true")
     monkeypatch.delenv("QUEUE_APPROVAL",raising=False)
 
 
@@ -337,3 +338,182 @@ def test_only_old_finished_outage_added_to_new_graph_no_notice(
     current["source"]={"1":"no","2":"yes","3":"yes"}
     asyncio.run(bot.once())
     assert sent == []
+
+
+def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
+    """The address endpoint is not a single point of failure."""
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    setup_address(monkeypatch)
+    import alerts
+    async def unavailable(_secret):
+        raise RuntimeError("DTEK temporary error")
+    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
+    state_file.write_text(json.dumps({"house:groups": ["GPV6.2"]}), encoding="utf-8")
+    checked = []
+    async def schedules(groups):
+        checked.append(groups)
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    messages = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda _t, _c, msg, deadline=None: messages.append(msg))
+    asyncio.run(bot.once())
+    assert checked == [("GPV6.2",)]
+    assert len(messages) == 1
+
+
+def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    setup_address(monkeypatch)
+    import alerts
+    async def unavailable(_secret):
+        raise RuntimeError("DTEK temporary error")
+    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
+    called = []
+    async def schedules(*args):
+        called.append(args)
+        return fake_schedule()
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    asyncio.run(bot.once())
+    assert called == []
+
+
+def test_no_address_is_disabled_unless_explicitly_approved(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.delenv("ALLOW_UNVERIFIED_GROUP")
+    called = []
+    async def schedules(*args):
+        called.append(args)
+        return fake_schedule()
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    with pytest.raises(RuntimeError, match="DTEK_ADDRESS_JSON"):
+        asyncio.run(bot.once())
+    assert called == []
+
+
+def test_dry_run_never_sends_telegram(tmp_path, monkeypatch):
+    state_file = tmp_path / "dry-run-only.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    async def schedules():
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                            AssertionError("DRY_RUN must never send")))
+    asyncio.run(bot.once())
+    assert not state_file.exists()
+
+
+def test_dry_run_does_not_change_existing_state(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.setenv("DRY_RUN", "true")
+    state_file.write_text('{"unchanged": true}', encoding="utf-8")
+    async def schedules():
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_a, **_k: (_ for _ in ()).throw(
+                            AssertionError("No Telegram calls in dry-run")))
+    asyncio.run(bot.once())
+    assert json.loads(state_file.read_text()) == {"unchanged": True}
+
+
+def test_active_emergency_marks_daily_schedule_as_conditional(tmp_path,monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch,state_file)
+    state_file.write_text(json.dumps({
+        "official:status:emergency:region":{"status":"active"},
+    }), encoding="utf-8")
+    async def load():
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot,"get_schedule",load)
+    messages=[]
+    monkeypatch.setattr(bot,"telegram_send",
+                        lambda _t,_c,txt,deadline=None: messages.append(txt))
+    asyncio.run(bot.once())
+    assert len(messages)==1
+    assert "погодинний графік може не діяти" in messages[0]
+
+
+def test_official_feed_error_marks_action_failed_after_schedule_delivery(
+        tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch,state_file)
+    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
+    setup_address(monkeypatch)
+    import alerts
+    monkeypatch.setattr(alerts,"fetch_official_page",
+                        lambda: (_ for _ in ()).throw(RuntimeError("WAF")))
+    async def load(group_ids):
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot,"get_schedule",load)
+    messages=[]
+    monkeypatch.setattr(bot,"telegram_send",
+                        lambda _t,_c,txt,deadline=None: messages.append(txt))
+    with pytest.raises(RuntimeError,match="official_feed"):
+        asyncio.run(bot.once())
+    assert messages  # Valid daily GPV was not blocked by official feed outage.
+
+
+def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch,state_file)
+    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
+    monkeypatch.setenv(
+        "DTEK_ADDRESS_JSON",
+        '{"city":"м. Кривий Ріг","street":"вул. Умовна","house":"12Г"}'
+    )
+    import alerts
+    async def fail(_secret):
+        raise RuntimeError("DTEK address API offline")
+    monkeypatch.setattr(alerts, "fetch_address_status", fail)
+    now = datetime.now(KYIV)
+    def news():
+        return ('<div class="tgme_widget_message" data-post="dtek_ua/999">'
+                '<div class="tgme_widget_message_text">'
+                'Дніпропетровщина: запроваджено екстрені відключення'
+                '</div><time datetime="' + now.isoformat() + '">x</time></div>')
+    monkeypatch.setattr(alerts,"fetch_official_page",news)
+    async def should_not_fetch(*args):
+        raise AssertionError("No unverified GPV should be fetched")
+    monkeypatch.setattr(bot, "get_schedule", should_not_fetch)
+    messages=[]
+    monkeypatch.setattr(bot,"telegram_send",
+                        lambda _t,_c,txt,deadline=None: messages.append(txt))
+    asyncio.run(bot.once())
+    assert len(messages)==1
+    assert "екстрені" in messages[0].casefold()
+
+
+def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch,state_file)
+    setup_address(monkeypatch)
+    import alerts
+    from types import SimpleNamespace
+    async def two_queues(_secret):
+        return SimpleNamespace(group_ids=["GPV5.1","GPV6.2"],
+                               outage_type="",start_date=None,
+                               end_date=None,sub_type=None)
+    monkeypatch.setattr(alerts,"fetch_address_status",two_queues)
+    async def load(groups):
+        source, _ = fake_schedule(days=1)
+        dt = datetime.now(KYIV).date()
+        stamp = str(int(datetime(dt.year,dt.month,dt.day,tzinfo=KYIV).timestamp()))
+        source.fact.days[stamp]["GPV5.1"] = dict(source.fact.days[stamp]["GPV6.2"])
+        return source,list(groups)
+    monkeypatch.setattr(bot,"get_schedule",load)
+    sent=[]
+    monkeypatch.setattr(bot,"telegram_send",
+                        lambda _t,_c,text,deadline=None:sent.append(text))
+    asyncio.run(bot.once())
+    schedules=[x for x in sent if "Графік відключень" in x]
+    assert len(schedules)==2
+    assert all("Розподіл квартир між чергами не підтверджено" in x for x in schedules)

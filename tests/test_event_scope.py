@@ -79,9 +79,10 @@ def test_other_quarter_district_and_city_are_not_our_house():
 def test_exact_house_reference_matches_but_neighbor_does_not():
     yes = (
         "Кривий Ріг: аварія, вул. Умовна, буд. 12Г",
-        "Кривий Ріг: аварія, вул. Умовна, 12/Г",
+        "Кривий Ріг: аварія, вул. Умовна, 12-Г",
     )
     no = (
+        "Кривий Ріг: аварія, вул. Умовна, 12/Г",
         "Кривий Ріг: аварія, вул. Умовна, 12Д",
         "Кривий Ріг: аварія, вул. Умовна, 12",
         "Кривий Ріг: аварія, вул. Інша, буд. 12Г",
@@ -178,3 +179,23 @@ def test_region_headline_with_only_other_towns_is_not_house_notice():
         "Дніпропетровщина: екстрені відключення у деяких містах",
     )
     assert all(not covers_house(item, FULL) for item in examples)
+
+
+def test_named_other_towns_in_plural_is_not_whole_oblast():
+    assert not covers_house(
+        "Дніпропетровщина: запроваджено екстрені відключення "
+        "у містах Нікополь та Павлоград", FULL
+    )
+
+
+def test_named_other_cities_without_whole_region_are_silent():
+    examples = [
+        "Дніпропетровщина: після обстрілу знеструмлено Дніпро та Павлоград",
+        "Дніпропетровщина: знеструмлено Синельникове",
+        "Дніпропетровщина: без світла мешканці Нікополя і Кам'янського",
+    ]
+    assert all(not covers_house(x, FULL) for x in examples)
+    assert covers_house(
+        "Дніпропетровщина: екстрені відключення по всій області, "
+        "включно з Дніпром і Павлоградом", FULL
+    )

@@ -79,7 +79,15 @@ def regional_event(post):
         context,
     ):
         return None
-    if re.search(r"\b(?:гав|графік\w*\s+аварійн\w*\s+відключен\w*)\b", context):
+    restore_gpv = bool(re.search(
+        r"(?:переходимо|повертаємось|повертаємося|перейшли|повернулися)\s+"
+        r"(?:до|на)\s+(?:стабілізаційн\w*\s+)?графік\w*|"
+        r"(?:відновлен\w*|відновили)\s+(?:дію\s+)?стабілізаційн\w*\s+графік\w*",
+        context,
+    ))
+    if restore_gpv:
+        kind = "emergency"
+    elif re.search(r"\b(?:гав|графік\w*\s+аварійн\w*\s+відключен\w*)\b", context):
         kind = "gav"
     elif "екстрен" in context and "відключен" in context:
         kind = "emergency"
@@ -92,7 +100,7 @@ def regional_event(post):
         kind = "area"
     else:
         return None
-    if re.search(
+    if restore_gpv or re.search(
         r"скасован|завершено|завершені|закінчен|відмінено|"
         r"відновлено|відновили|заживлено|заживили|повернул\w*\s+світло",
         title,
@@ -142,7 +150,10 @@ def regional_message(event, changed=False):
         body = ("Відключення можуть відбуватися поза погодинним графіком." if active else
                 "Це повідомлення про територію, а не підтвердження відновлення у будинку.")
 
-    if changed and active:
+    if changed == "publication" and active:
+        title = "🔄 <b>ДТЕК змінив офіційне повідомлення</b>"
+        body = "Змінено текст першоджерела. Час відключення міг залишитися незмінним."
+    elif changed and active:
         title = "🔄 <b>ДТЕК уточнив строки відключення</b>"
         body = "Офіційні дані про час події оновлено."
     coverage = event.get("coverage") or {}
@@ -237,6 +248,8 @@ def event_record(event, now):
     return {
         "status": event["status"],
         "event_id": fingerprint(identity),
+        "post_id": post["id"],
+        "content_hash": event.get("content_hash"),
         "revision": fingerprint(revision),
         "operator": "ДТЕК",
         "source": post["url"],
@@ -249,12 +262,19 @@ def event_record(event, now):
 
 
 def region_candidates(page, state, now, scope=None):
+    """Evaluate separately published DTEK events and previously edited posts.
+
+    Each new significant announcement is examined in publication order.
+    A cancellation already visible in the same batch suppresses obsolete
+    initial alerts. All content-hash and cursor updates are deferred until
+    successful notification delivery.
+    """
     posts = official_posts(page)
     if not posts:
         raise RuntimeError("Не вдалося прочитати офіційний канал ДТЕК")
     from event_scope import coverage_for_house
+
     old_id = state.get("official:last_id")
-    max_id = max(p["id"] for p in posts)
     first_run = old_id is None
     if first_run:
         old_id = min(p["id"] for p in posts) - 1
@@ -263,84 +283,129 @@ def region_candidates(page, state, now, scope=None):
     except (ValueError, TypeError):
         raise RuntimeError("Некоректний стан останнього офіційного повідомлення")
 
-    latest = {}
+    old_hashes = state.get("official:post_hashes", {})
+    if not isinstance(old_hashes, dict):
+        old_hashes = {}
+    hashes = dict(old_hashes)
+    max_id = max(p["id"] for p in posts)
+    by_scope = {}
     for post in posts:
-        if post["id"] <= old_id or post["date"] > now + timedelta(minutes=10):
+        pid = str(post["id"])
+        digest = hashlib.sha256(
+            (post["date"].isoformat() + "\n" + post["text"]).encode("utf-8")
+        ).hexdigest()[:24]
+        edit = pid in old_hashes and old_hashes[pid] != digest
+        new = post["id"] > old_id
+        hashes[pid] = digest
+        if not (new or edit):
+            continue
+        if post["date"] > now + timedelta(minutes=10):
             continue
         event = regional_event(post)
         coverage = coverage_for_house(post["text"], scope) if event else None
         if not event or not coverage:
             continue
         event["coverage"] = coverage
+        event["content_hash"] = digest
+        age = now - post["date"]
+        finish = published_event_end(post)
+        if age > timedelta(days=2) and not (
+            finish and finish > now and age <= timedelta(days=7)
+        ):
+            continue
+        if event["status"] == "active" and finish and finish <= now:
+            event["status"] = "expired"
         key = f"official:status:{event['kind']}:{coverage['level']}"
+        by_scope.setdefault(key, []).append((post["id"], event))
+
+    pending = []
+    for key, candidates in by_scope.items():
         previous = state.get(key)
         previous_status = (
             previous.get("status") if isinstance(previous, dict) else previous
         )
-        age = now - post["date"]
-        finish = published_event_end(post)
-        # A delayed post is still useful if DTEK explicitly says the
-        # reported outage extends into the future. Never invent an end.
-        if event["status"] == "active":
-            if finish and finish <= now:
-                event["status"] = "expired"
-            elif age > timedelta(hours=6) and not (
-                finish and finish > now and age <= timedelta(days=2)
-            ):
-                continue
-            if first_run and age > timedelta(hours=2) and not (
-                finish and finish > now and age <= timedelta(days=2)
-            ):
-                continue
-        elif age > timedelta(days=2):
+        # Do not announce an outage and its resolution after BOTH happened.
+        # With a previously announced outage, send the final closure.
+        last_id, last_event = candidates[-1]
+        if last_event["status"] in ("ended", "expired"):
+            if previous_status == "active":
+                record = event_record(last_event, now)
+                text = (regional_message(last_event)
+                        if last_event["status"] == "ended" else None)
+                pending.append((last_id, key, record, text))
             continue
-        # An old cancellation should not be sent unless a previous
-        # notification was delivered for this event type and scope.
-        latest[key] = (post["id"], event)
 
-    pending = []
-    for key, (post_id, event) in sorted(
-        latest.items(), key=lambda item: item[1][0]
-    ):
-        old = state.get(key)
-        old_status = old.get("status") if isinstance(old, dict) else old
-        current = event_record(event, now)
-        status = current["status"]
-        if status == "expired":
-            if old_status == "active":
-                pending.append((post_id, key, current, None))
-            continue
-        if status == "ended":
-            if old_status == "active":
+        shadow = previous
+        for post_id, event in candidates:
+            current = event_record(event, now)
+            status = current["status"]
+            prior_status = (
+                shadow.get("status") if isinstance(shadow, dict) else shadow
+            )
+            if status in ("ended", "expired"):
+                if prior_status == "active":
+                    pending.append((
+                        post_id, key, current,
+                        regional_message(event) if status == "ended" else None,
+                    ))
+                    shadow = current
+                continue
+
+            if prior_status != "active":
                 pending.append((post_id, key, current, regional_message(event)))
-            continue
-        if first_run or old_status != "active":
-            pending.append((post_id, key, current, regional_message(event)))
-            continue
-        # Ongoing notices with a new post ID but unchanged facts are repeats.
-        # A verified changed start/end time is a meaningful update.
-        old_revision = old.get("revision") if isinstance(old, dict) else None
-        timing_changed = bool(current["start"] or current["end"]) and (
-            old_revision is not None and current["revision"] != old_revision
-        )
-        new_activation = (
-            isinstance(old, dict)
-            and current["event_id"] != old.get("event_id")
-            and re.search(r"запроваджен|введен|розпочат", event["post"]["text"].splitlines()[0].casefold())
-            and current["published"][:10] != str(old.get("published", ""))[:10]
-        )
-        if timing_changed or new_activation:
-            pending.append((
-                post_id, key, current, regional_message(event, changed=True)
-            ))
+                shadow = current
+                continue
+
+            old_start = shadow.get("start") if isinstance(shadow, dict) else None
+            old_end = shadow.get("end") if isinstance(shadow, dict) else None
+            # Missing official timestamps are NOT evidence that an estimate
+            # changed or was cancelled.
+            updated_time = (
+                bool(current["start"] and current["start"] != old_start)
+                or bool(current["end"] and current["end"] != old_end)
+            )
+            title = event["post"]["text"].splitlines()[0].casefold()
+            fresh_activation = bool(
+                re.search(r"запроваджен|введен|розпочат", title)
+                and isinstance(shadow, dict)
+                and current["content_hash"] != shadow.get("content_hash")
+                and current["source"] != shadow.get("source")
+            )
+            edited_post = bool(
+                isinstance(shadow, dict)
+                and current["source"] == shadow.get("source")
+                and current["content_hash"] != shadow.get("content_hash")
+            )
+            if updated_time or fresh_activation or edited_post:
+                pending.append((
+                    post_id, key, current,
+                    regional_message(
+                        event, changed="publication"
+                        if edited_post and not updated_time else True
+                    ),
+                ))
+                shadow = current
+
+    # A content hash stores a publication version, never private house data.
+    # Keep the most recent 100 visible posts, not an unbounded public history.
+    visible_keys = [k for k in hashes if str(k).isdigit()]
+    limited_hashes = {
+        k: hashes[k] for k in
+        sorted(visible_keys, key=lambda x: int(x))[-100:]
+    }
     if first_run and not pending:
         state["official:last_id"] = max_id
+        state["official:post_hashes"] = limited_hashes
         LOG.info("Початкова синхронізація офіційного каналу: %d", max_id)
         return []
-    # The checkpoint is persisted after all successful Telegram sends.
+    # Cursor and hash snapshots commit only after successful sends.
+    pending.sort(key=lambda item: item[0])
+    pending.append((max(old_id, max_id), "official:post_hashes",
+                    limited_hashes, None))
     pending.append((max(old_id, max_id), "official:last_id",
                     max(old_id, max_id), None))
     return pending
+
 
 def fetch_official_page():
     response = requests.get(
@@ -352,8 +417,11 @@ def fetch_official_page():
 
 
 def normalized_house(value):
-    text = re.sub(r"[\s/\\.-]", "", str(value)).casefold()
-    return text.replace("a", "а").replace("b", "в")
+    """Preserve house-number separators: 1/1 is NOT house 11."""
+    text = re.sub(r"\s+", "", str(value)).casefold().replace("\\", "/")
+    text = text.replace("a", "а").replace("b", "в").replace("i", "і")
+    # DTEK commonly spells a letter suffix with or without a dash.
+    return re.sub(r"(?<=\d)-(?=[а-яіїєґ])", "", text)
 
 
 def address_fields(secret):

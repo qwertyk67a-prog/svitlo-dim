@@ -514,21 +514,29 @@ async def once():
         trim_state, verified_house_queues,
     )
 
+    dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat:
+    if not dry_run and (not token or not chat):
         raise RuntimeError("Відсутні TELEGRAM_BOT_TOKEN або TELEGRAM_CHAT_ID")
 
     path = Path(os.getenv("STATE_PATH", "data/state.json"))
     state = state_read(path)
+
+    def persist():
+        """Never mutate a real notification checkpoint during a dry run."""
+        if not dry_run:
+            state_write(path, state)
+
     now = datetime.now(KYIV)
     today = now.date()
     selected = os.getenv("DTEK_GROUP", "6.2").strip()
     group_id = "GPV" + selected
     leads = parse_reminder_minutes(os.getenv("REMINDER_MINUTES", "0"))
     trim_state(state, today)
-    state_write(path, state)
+    persist()
     problems = []
+    source_problems = []
     sent = 0
 
     # A DTEK address may have multiple queues. Never infer assignments
@@ -538,6 +546,10 @@ async def once():
     queue_change = None
     regional_scope = None
     private_address = os.getenv("DTEK_ADDRESS_JSON", "").strip()
+    allow_unverified = os.getenv("ALLOW_UNVERIFIED_GROUP", "false").lower() == "true"
+    if not private_address and not allow_unverified:
+        LOG.warning("Адресу ДТЕК не налаштовано; невизначену чергу не публікуємо")
+        raise RuntimeError("Потрібен DTEK_ADDRESS_JSON; непідтверджена черга заборонена")
     if private_address:
         try:
             from alerts import fetch_address_status
@@ -554,13 +566,20 @@ async def once():
             # confirmed queues govern automatic tracking after migration.
             if "house:queue_hold" in state:
                 state.pop("house:queue_hold", None)
-                state_write(path, state)
+                persist()
         except Exception as exc:
             LOG.warning("Не вдалося перевірити черги за адресою: %s",
                         type(exc).__name__)
-            # Missing or ambiguous address data are not a queue change.
-            # Refuse to publish a potentially incorrect fixed queue.
-            return
+            # A failed address request must NOT stop the official news feed.
+            # Only previously verified, persisted queues may supply GPV facts.
+            cached = state.get("house:groups")
+            if cached:
+                try:
+                    house_groups = verified_house_queues(cached)
+                    house_snapshot = list(house_groups)
+                    LOG.warning("Використовую останні підтверджені черги будинку")
+                except ValueError:
+                    house_groups = None
     elif state.get("house:queue_hold"):
         LOG.warning("Раніше чергу не підтверджено; потрібен секрет адреси")
         return
@@ -581,7 +600,7 @@ async def once():
             enqueue(1, "house:groups", house_snapshot, queue_change, "queue_change")
         elif state.get("house:groups") != house_snapshot:
             state["house:groups"] = house_snapshot
-            state_write(path, state)
+            persist()
 
     # Official emergency and GAV announcements are prioritized.
     if os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
@@ -593,9 +612,10 @@ async def once():
             for post_id, key, value, message in events:
                 enqueue(0, key, value, message, "official", cursor=post_id)
             if not events and "official:last_id" in state:
-                state_write(path, state)
+                persist()
         except Exception as exc:
             LOG.warning("Офіційні оголошення недоступні: %s", type(exc).__name__)
+            source_problems.append("official_feed")
 
     if house is not None:
         try:
@@ -610,13 +630,31 @@ async def once():
             LOG.warning("Адресні події недоступні: %s", type(exc).__name__)
 
     try:
-        source, groups = await (
-            get_schedule(house_groups) if house_groups is not None
-            else get_schedule()
-        )
+        if house_groups is not None:
+            source, groups = await get_schedule(house_groups)
+        elif allow_unverified and not private_address:
+            source, groups = await get_schedule()
+        else:
+            source, groups = None, []
     except Exception as exc:
         LOG.error("Графік ДТЕК недоступний: %s", type(exc).__name__)
+        source_problems.append("dtek_schedule")
         source, groups = None, []
+
+    # If an official emergency/GAV regime remains active, the daily GPV
+    # cannot be presented as guaranteed operational at this moment.
+    emergency_states = {
+        key: value.get("status") if isinstance(value, dict) else value
+        for key, value in state.items()
+        if key.startswith(("official:status:emergency:",
+                           "official:status:gav:"))
+    }
+    for item in pending:
+        _priority, _seq, key, value, _message, origin, _deadline, _cursor = item
+        if origin == "official" and key.startswith(
+                ("official:status:emergency:", "official:status:gav:")):
+            emergency_states[key] = value.get("status")
+    uncertain_gpv = any(x == "active" for x in emergency_states.values())
 
     if source:
         for group in groups:
@@ -644,7 +682,7 @@ async def once():
                     if day == today and not new_visible and not old_visible:
                         next_state["status"] = "historical_only"
                         state[key] = next_state
-                        state_write(path, state)
+                        persist()
                         continue
 
                     # A previous relevant outage was removed and the new
@@ -663,7 +701,7 @@ async def once():
                                 upcoming_signature(day, spans, now) and
                                 previous_status == "outages"):
                             state[key] = next_state
-                            state_write(path, state)
+                            persist()
                             continue
 
                         event = ("resumed" if previous_status == "cancelled" else
@@ -688,7 +726,7 @@ async def once():
                             day, old_spans, now):
                         next_state["status"] = "cancelled"
                         state[key] = next_state
-                        state_write(path, state)
+                        persist()
                         continue
                     message = cancellation_message(
                         day, group, updated, remaining_today=day == today
@@ -706,6 +744,18 @@ async def once():
                     LOG.warning("Невідомий тип графіка: %s", kind)
                     continue
                 if message:
+                    if house_groups is not None and len(house_groups) > 1:
+                        message += (
+                            "\n⚠️ Для будинку ДТЕК вказує кілька черг. "
+                            "Цей графік стосується лише зазначеної черги. "
+                            "Розподіл квартир між чергами не підтверджено; "
+                            "для будинків зі складним живленням ДТЕК не гарантує прогноз."
+                        )
+                    if uncertain_gpv and kind in ("day", "week"):
+                        message += (
+                            "\n⚠️ ДТЕК повідомляв про аварійний режим на цій території. "
+                            "Поки він діє, погодинний графік може не діяти."
+                        )
                     enqueue(priority, key, next_state, message, "schedule")
 
             # Exact lead-time reminders are independent of schedule-change notices.
@@ -723,11 +773,11 @@ async def once():
             continue
         if key == "official:last_id" and origin == "official":
             state[key] = value
-            state_write(path, state)
+            persist()
             continue
         if not message:
             state[key] = value
-            state_write(path, state)
+            persist()
             continue
         if deadline is not None and datetime.now(KYIV) >= deadline:
             LOG.info("Пропущено прострочене нагадування: %s", key)
@@ -740,7 +790,10 @@ async def once():
             LOG.info("Пропущено прострочене нагадування: %s", key)
             continue
         try:
-            telegram_send(token, chat, message, deadline=deadline)
+            if dry_run:
+                LOG.info("DRY-RUN: сформовано сповіщення %s; Telegram не викликано", key)
+            else:
+                telegram_send(token, chat, message, deadline=deadline)
         except Exception as exc:
             if origin == "official":
                 official_failed = True
@@ -749,15 +802,28 @@ async def once():
             continue
         last_send = time.monotonic()
         if origin == "official":
-            state["official:last_id"] = cursor
+            state["official:last_id"] = max(
+                int(state.get("official:last_id", 0)), int(cursor)
+            )
+            # One record per delivered announcement, not merely a status
+            # shared between all incidents of the same regional type.
+            state[f"official:event:{cursor}"] = value
         state[key] = value
-        state_write(path, state)
+        persist()
         sent += 1
-        LOG.info("Надіслано: %s", key)
+        LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", key)
 
-    LOG.info("Нових сповіщень: %d; помилок доставки: %d", sent, len(problems))
+    LOG.info("%s: %d; помилок доставки: %d",
+             "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
+             sent, len(problems))
     if problems:
         raise RuntimeError(f"Помилки Telegram: {len(problems)}; успішні події збережено")
+    if source_problems:
+        # The workflow must not appear healthy while an enabled official
+        # source is silently failing. Valid other notices were processed.
+        raise RuntimeError(
+            "Неповна перевірка офіційних джерел: " + ", ".join(source_problems)
+        )
 
 
 def main():

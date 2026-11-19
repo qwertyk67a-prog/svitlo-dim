@@ -42,7 +42,7 @@ def test_opt_in_default_off_and_multiple_choices():
             parse_reminder_minutes(value)
 
 
-def test_one_minute_grace_and_skip_late_reminder():
+def test_four_minute_grace_and_skip_late_reminder():
     src = provider()
     assert due_reminders(src, GROUP, on(17,54,59), (5,), {}, parse_verified) == []
     items = due_reminders(src, GROUP, on(17,55,30), (5,), {}, parse_verified)
@@ -51,8 +51,9 @@ def test_one_minute_grace_and_skip_late_reminder():
     assert key == "reminder:2026-11-12:GPV6.2:1080:5"
     assert "Нагадування" in message
     assert "17:55" not in message and "18:00" in message
-    assert deadline == on(17,56)
-    assert due_reminders(src, GROUP, on(17,56), (5,), {}, parse_verified) == []
+    assert deadline == on(17,59)
+    assert len(due_reminders(src, GROUP, on(17,58), (5,), {}, parse_verified)) == 1
+    assert due_reminders(src, GROUP, on(17,59), (5,), {}, parse_verified) == []
     assert due_reminders(src, GROUP, on(18,1), (5,), {}, parse_verified) == []
 
 

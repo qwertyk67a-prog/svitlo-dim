@@ -70,3 +70,22 @@ def test_verify_address_invoked_as_module_and_never_sends_telegram():
     import importlib
     verifier=importlib.import_module("scripts.verify_address")
     assert callable(verifier.main)
+
+
+def test_manual_dry_run_workflow_has_no_telegram_or_write_access():
+    content = (ROOT / ".github/workflows/audit-dry-run.yml").read_text()
+    assert "workflow_dispatch" in content
+    assert "contents: read" in content
+    assert "TELEGRAM_BOT_TOKEN" not in content
+    assert "TELEGRAM_CHAT_ID" not in content
+    assert 'DRY_RUN: "true"' in content
+    assert "DTEK_ADDRESS_JSON" in content
+
+
+def test_dependencies_pinned_against_compatible_constraints():
+    requirements = (ROOT / "requirements.txt").read_text()
+    assert "-c constraints.txt" in requirements
+    assert "requests==" in requirements
+    assert "beautifulsoup4==" in requirements
+    assert "dtek-blackout-client==" in requirements
+    assert "playwright==" in (ROOT / "constraints.txt").read_text()

@@ -1,0 +1,28 @@
+# Versions confirmed in GitHub Actions Python 3.12 on 19 November 2026.
+# This is a deployment-specific pin set, not a security guarantee.
+PyYAML==6.0.3
+annotated-types==0.8.0
+beautifulsoup4==4.15.0
+certifi==2026.10.23
+cffi==2.1.1
+charset_normalizer==3.5.2
+curl-cffi==0.14.0
+dtek-blackout-client==0.1.12
+greenlet==3.5.6
+idna==3.20
+iniconfig==2.3.1
+packaging==26.3
+playwright==1.65.2
+playwright-stealth==2.0.3
+pluggy==1.7.0
+pycparser==3.12
+pydantic==2.14.4
+pydantic-core==2.50.5
+pygments==2.21.0
+pytest==9.2.0
+requests==2.34.2
+soupsieve==4.1.2
+typing-extensions==4.16.0
+typing-inspection==0.4.5
+tzdata==2026.6
+urllib3==2.8.0

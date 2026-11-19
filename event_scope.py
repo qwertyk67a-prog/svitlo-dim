@@ -57,13 +57,21 @@ def _exact_house(text, scope):
     street = _clean(scope["street"])
     street = re.sub(r"^(?:вул\.?|вулиця|просп\.?|проспект)\s+", "", street)
     street = re.sub(r"\s+", r"\\s+", re.escape(street))
-    house = re.sub(r"[\s/\\.\-]", "", _clean(scope["house"]))
-    match = re.fullmatch(r"(\d+)([а-яіїєґa-z]?)", house)
+    from alerts import normalized_house
+    house = normalized_house(scope["house"])
+    match = re.fullmatch(r"(\d+)([а-яіїєґ]?)(?:/(\d+[а-яіїєґ]?))?", house)
     if not match or not street:
         return False
-    number, letter = match.groups()
-    letter = {"a": "[аa]", "b": "[вb]", "i": "[іi]"}.get(letter, re.escape(letter))
-    number_regex = rf"(?<!\d){re.escape(number)}[\s/\\.\-]*{letter}(?![\w])"
+    number, letter, subnumber = match.groups()
+    letter_regex = {"а": "[аa]", "в": "[вb]", "і": "[іi]"}.get(
+        letter, re.escape(letter)
+    )
+    if subnumber:
+        number_regex = (rf"(?<![\d/]){re.escape(number)}\s*/\s*"
+                        rf"{re.escape(subnumber)}(?![\w/])")
+    else:
+        number_regex = (rf"(?<![\d/]){re.escape(number)}[\s\-]*"
+                        rf"{letter_regex}(?![\w/])")
     return bool(re.search(
         rf"\b{street}\b[\s,;:№#.\-/\\]*(?:буд(?:инок)?\.?\s*№?\s*)?"
         rf"[\s,;:№#.\-/\\]{{0,18}}{number_regex}", text
@@ -230,6 +238,11 @@ def coverage_for_house(announcement, scope):
     # cities or a non-exhaustive subset of communities. Neither proves that
     # our Kryvyi Rih house is in the affected subset.
     if re.search(
+        r"\b(?:у|в|на)\s+(?:містах|громадах|населених\s+пунктах)\b",
+        affected,
+    ) and not any(name in affected for name in CITY_NAMES):
+        return None
+    if re.search(
         r"\b(?:лише|тільки|виключно)\s+(?:у|в|на)\s+"
         r"(?:деяк\w*|окрем\w*|кільк\w*|певн\w*)?\s*"
         r"(?:міст\w*|громад\w*|район\w*|населен\w*\s+пункт\w*)\b",
@@ -248,6 +261,20 @@ def coverage_for_house(announcement, scope):
         return None
 
     if OTHER_CITY.search(affected) and not any(name in affected for name in CITY_NAMES):
+        return None
+    named_other_places = re.search(
+        r"\b(?:дніпро|дніпра|дніпрі|нікопол\w*|павлоград\w*|"
+        r"кам['’]?янськ\w*|самар(?:а|у|і|ом|івськ\w*)?|"
+        r"синельник\w*|марганц\w*|марганець|тернівк\w*|"
+        r"апостолов\w*|зеленодольськ\w*)\b", affected,
+    )
+    explicitly_whole_region = bool(re.search(
+        r"(?:по|на|в|у)\s+всій\s+(?:дніпропетровщин\w*|област\w*)|"
+        r"на\s+всій\s+територі\w*\s+област\w*|"
+        r"всій\s+дніпропетровськ\w*\s+област\w*", affected,
+    ))
+    if named_other_places and not explicitly_whole_region and not any(
+            name in affected for name in CITY_NAMES):
         return None
     if OTHER_REGION.search(affected) and not (
         "дніпропетровськ" in affected or any(name in affected for name in REGION_NAMES)

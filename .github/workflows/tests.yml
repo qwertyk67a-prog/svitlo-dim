@@ -8,6 +8,8 @@ on:
       - event_scope.py
       - requirements.txt
       - .github/workflows/check.yml
+      - .github/workflows/audit-dry-run.yml
+      - constraints.txt
       - .github/dependabot.yml
       - tests/**
       - .github/workflows/tests.yml
@@ -25,4 +27,5 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt pytest PyYAML
+      - run: python -m pip check
       - run: python -m pytest -q tests/
