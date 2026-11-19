@@ -20,7 +20,7 @@ def fake_schedule(group="GPV6.2", days=2, has_week=False):
         raw[stamp]={group: {"1":"no","2":"yes"}}
     return SimpleNamespace(
         fact=SimpleNamespace(days=raw,update="12.11.2026 17:00"),
-        preset=SimpleNamespace(time_zone={"1":"00-12","2":"12-24"},
+        preset=SimpleNamespace(time_zone={"1":"00-24","2":"12-24"},
                                is_active=has_week,groups={}),
     ),[group]
 
@@ -105,7 +105,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
         today = datetime.now(KYIV).date()
         stamp = str(int(datetime(today.year, today.month, today.day, tzinfo=KYIV).timestamp()))
         source = SimpleNamespace(
-            preset=SimpleNamespace(time_zone={"1":"00-12","2":"12-24"},
+            preset=SimpleNamespace(time_zone={"1":"00-24","2":"12-24"},
                                    is_active=False, groups={}),
             fact=SimpleNamespace(
                 days={stamp: {
