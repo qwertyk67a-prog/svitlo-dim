@@ -536,6 +536,7 @@ async def once():
     trim_state(state, today)
     persist()
     problems = []
+    source_problems = []
     sent = 0
 
     # A DTEK address may have multiple queues. Never infer assignments
@@ -548,9 +549,7 @@ async def once():
     allow_unverified = os.getenv("ALLOW_UNVERIFIED_GROUP", "false").lower() == "true"
     if not private_address and not allow_unverified:
         LOG.warning("Адресу ДТЕК не налаштовано; невизначену чергу не публікуємо")
-        if dry_run:
-            raise RuntimeError("DRY-RUN потребує налаштованого секрету адреси ДТЕК")
-        return
+        raise RuntimeError("Потрібен DTEK_ADDRESS_JSON; непідтверджена черга заборонена")
     if private_address:
         try:
             from alerts import fetch_address_status
@@ -616,6 +615,7 @@ async def once():
                 persist()
         except Exception as exc:
             LOG.warning("Офіційні оголошення недоступні: %s", type(exc).__name__)
+            source_problems.append("official_feed")
 
     if house is not None:
         try:
@@ -638,7 +638,23 @@ async def once():
             source, groups = None, []
     except Exception as exc:
         LOG.error("Графік ДТЕК недоступний: %s", type(exc).__name__)
+        source_problems.append("dtek_schedule")
         source, groups = None, []
+
+    # If an official emergency/GAV regime remains active, the daily GPV
+    # cannot be presented as guaranteed operational at this moment.
+    emergency_states = {
+        key: value.get("status") if isinstance(value, dict) else value
+        for key, value in state.items()
+        if key.startswith(("official:status:emergency:",
+                           "official:status:gav:"))
+    }
+    for item in pending:
+        _priority, _seq, key, value, _message, origin, _deadline, _cursor = item
+        if origin == "official" and key.startswith(
+                ("official:status:emergency:", "official:status:gav:")):
+            emergency_states[key] = value.get("status")
+    uncertain_gpv = any(x == "active" for x in emergency_states.values())
 
     if source:
         for group in groups:
@@ -728,6 +744,11 @@ async def once():
                     LOG.warning("Невідомий тип графіка: %s", kind)
                     continue
                 if message:
+                    if uncertain_gpv and kind in ("day", "week"):
+                        message += (
+                            "\n⚠️ ДТЕК повідомляв про аварійний режим на цій території. "
+                            "Поки він діє, погодинний графік може не діяти."
+                        )
                     enqueue(priority, key, next_state, message, "schedule")
 
             # Exact lead-time reminders are independent of schedule-change notices.
@@ -790,6 +811,12 @@ async def once():
              sent, len(problems))
     if problems:
         raise RuntimeError(f"Помилки Telegram: {len(problems)}; успішні події збережено")
+    if source_problems:
+        # The workflow must not appear healthy while an enabled official
+        # source is silently failing. Valid other notices were processed.
+        raise RuntimeError(
+            "Неповна перевірка офіційних джерел: " + ", ".join(source_problems)
+        )
 
 
 def main():

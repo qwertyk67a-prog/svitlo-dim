@@ -8,6 +8,8 @@ on:
       - event_scope.py
       - requirements.txt
       - .github/workflows/check.yml
+      - .github/workflows/audit-dry-run.yml
+      - constraints.txt
       - .github/dependabot.yml
       - tests/**
       - .github/workflows/tests.yml
