@@ -70,11 +70,24 @@ def regional_event(post):
         kind = "gav"
     elif "екстрен" in title and "відключен" in title:
         kind = "emergency"
+    elif re.search(
+        r"\b(?:знеструмл\w*|без\s+світла|"
+        r"(?:відсутн\w*|припинен\w*)\s+електропостачан\w*)\b",
+        title,
+    ):
+        kind = "area"
     else:
         return None
-    if re.search(r"скасован|припинен|завершен|відмінено", title):
+    if re.search(
+        r"скасован|завершен|відмінено|відновлен|заживлен|повернул\w*\s+світло",
+        title,
+    ):
         status = "ended"
-    elif re.search(r"запроваджен|застосован|введен|діють|тривають|продовжен", title + " " + post["text"].casefold()):
+    elif re.search(
+        r"запроваджен|застосован|введен|діють|тривають|продовжен|"
+        r"знеструмл|без\s+світла|відсутн\w*\s+електропостачан",
+        title + " " + post["text"].casefold(),
+    ):
         status = "active"
     else:
         # Ambiguous headlines must never generate residents' alerts.
@@ -100,17 +113,42 @@ def regional_message(event):
                  "✅ <b>Екстрені відключення скасовано</b>")
         body = ("Під час екстрених відключень погодинний графік може не діяти." if active
                 else "Скасовано саме екстрений режим. Актуальний погодинний графік перевіряється окремо.")
-    else:
+    elif kind == "gav":
         title = ("‼️ <b>Оголошено графіки аварійних відключень</b>" if active else
                  "✅ <b>Графіки аварійних відключень скасовано</b>")
         body = ("Погодинний графік може бути неактуальним." if active else
                 "Оновлення стосується аварійного режиму, а не гарантії наявності світла.")
+    else:
+        title = ("⚠️ <b>ДТЕК повідомив про знеструмлення</b>" if active else
+                 "✅ <b>ДТЕК повідомив про відновлення електропостачання на території</b>")
+        body = ("Відключення можуть відбуватися поза погодинним графіком." if active else
+                "Це повідомлення про територію, а не підтвердження відновлення у будинку.")
+
+    coverage = event.get("coverage") or {}
+    label = html.escape(coverage.get("label") or area)
+    place_note = (
+        f"Зазначена територія: {label}. "
+        "Будинок розташований у цій території."
+    )
+    uncertainty = (
+        "ДТЕК повідомляє про часткове знеструмлення на території. "
+        "Невідомо, чи зачепило відключення конкретний будинок."
+        if coverage.get("partial") else
+        "Інформація стосується території, до якої входить будинок. "
+        "Фактичну наявність електроенергії у будинку не підтверджено."
+    )
+    if coverage.get("level") == "house":
+        uncertainty = (
+            "Подія зазначена для будинку за адресою. "
+            "Бот не вимірює фактичну наявність електроенергії."
+        )
     reported = event["post"]["date"].astimezone(KYIV).strftime("%d.%m.%Y %H:%M")
     return "\n".join((
         title, f"📍 {html.escape(area)}", "",
+        place_note, uncertainty,
         f"Офіційне повідомлення опубліковано: {reported}.",
         body,
-        "Це повідомлення про режим у регіоні, а не підтвердження відключення конкретного будинку.",
+        "Це повідомлення не підтверджує відключення кожної квартири.",
         f'<a href="{html.escape(event["post"]["url"], quote=True)}">Офіційне повідомлення ДТЕК</a>',
     ))
 
@@ -119,7 +157,7 @@ def region_candidates(page, state, now, scope=None):
     posts = official_posts(page)
     if not posts:
         raise RuntimeError("Не вдалося прочитати офіційний канал ДТЕК")
-    from event_scope import covers_house
+    from event_scope import coverage_for_house
     old_id = state.get("official:last_id")
     max_id = max(p["id"] for p in posts)
     if old_id is None:
@@ -132,7 +170,9 @@ def region_candidates(page, state, now, scope=None):
             if not timedelta(0) <= age <= timedelta(hours=2):
                 continue
             event = regional_event(post)
-            if event and covers_house(post["text"], scope):
+            coverage = coverage_for_house(post["text"], scope) if event else None
+            if event and coverage:
+                event["coverage"] = coverage
                 latest_by_kind[event["kind"]] = event
         pending_initial = []
         for kind, event in latest_by_kind.items():
@@ -159,8 +199,10 @@ def region_candidates(page, state, now, scope=None):
         if post["id"] <= old_id:
             continue
         event = regional_event(post)
-        if not event or not covers_house(post["text"], scope):
+        coverage = coverage_for_house(post["text"], scope) if event else None
+        if not event or not coverage:
             continue
+        event["coverage"] = coverage
         if post["date"] > now + timedelta(minutes=10):
             continue
         if now - post["date"] > timedelta(hours=6):
