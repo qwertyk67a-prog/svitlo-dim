@@ -175,7 +175,7 @@ def coverage_for_house(announcement, scope):
                 for k in ("city", "street", "house"))):
         return None
     text = _clean(announcement)
-    if not text or _exclusion_might_include_house(affected, scope):
+    if not text or _exclusion_might_include_house(text, scope):
         return None
 
     # Excluded places are not part of the affected geography.
@@ -193,7 +193,7 @@ def coverage_for_house(announcement, scope):
 
     # If a report specifies ANOTHER address, the wider city header does not
     # make that address relevant. A street-only notice is also insufficient.
-    if re.search(r"\b(?:вул\.?|вулиця|просп\.?|проспект|будинок|буд\.)\s+", text):
+    if re.search(r"\b(?:вул\.?|вулиця|просп\.?|проспект|будинок|буд\.)\s+", affected):
         return None
 
     # Explicit narrower locality beats the broader regional headline.
