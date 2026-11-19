@@ -15,6 +15,8 @@ on:
       - .github/workflows/tests.yml
       - .github/workflows/telegram-setup.yml
       - scripts/telegram_setup.py
+      - scripts/telegram_diagnose.py
+      - .github/workflows/telegram-diagnose.yml
   workflow_dispatch:
 permissions:
   contents: read

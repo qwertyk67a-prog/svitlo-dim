@@ -101,3 +101,16 @@ def test_telegram_setup_is_manual_read_only_and_does_not_activate_monitoring():
     assert "BOT_ENABLED" not in content
     assert "python -m scripts.telegram_setup" in content
     assert "sendMessage" not in content
+
+
+def test_telegram_diagnostic_no_mutations_and_no_plaintext_values():
+    content=(ROOT/".github/workflows/telegram-diagnose.yml").read_text()
+    script=(ROOT/"scripts/telegram_diagnose.py").read_text()
+    assert "contents: read" in content
+    assert "TELEGRAM_BOT_TOKEN" in content
+    assert "TELEGRAM_CHAT_ID" not in content
+    assert "python -m scripts.telegram_diagnose" in content
+    assert "sendMessage" not in script
+    assert "deleteWebhook" not in script
+    assert "setWebhook" not in script
+    assert "offset=" not in script

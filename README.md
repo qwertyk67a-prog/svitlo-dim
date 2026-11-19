@@ -132,3 +132,8 @@ Use an existing bot if it is still available through @BotFather. A new bot is no
 8. Run **Check DTEK schedule** manually once and check its GitHub Actions log.
 
 Never enter BotFather tokens into ChatGPT, GitHub Issues or publicly visible repository variables. The helper does not change BOT_ENABLED or DTEK data. Discovery reads recent commands; it can fail when a different consumer or a webhook already receives bot updates.
+
+
+## Безпечна діагностика Telegram
+
+Окремий workflow **Diagnose Telegram connection (no messages)** перевіряє getMe, стан webhook та кількість доступних Telegram update. Він не надсилає повідомлень та не друкує токен або вміст повідомлень. За наявності єдиного свіжого /chatid виводить номер групи. Налаштування токена та `BOT_ENABLED` не змінюються.
