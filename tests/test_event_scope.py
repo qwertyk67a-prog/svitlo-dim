@@ -169,3 +169,12 @@ def test_unrecognized_exception_remains_silent_instead_of_guessing():
     assert not covers_house(
         "Дніпропетровщина: запроваджені обмеження крім деяких районів", FULL
     )
+
+
+def test_region_headline_with_only_other_towns_is_not_house_notice():
+    examples = (
+        "Дніпропетровщина: екстрені відключення лише у місті Марганець",
+        "Дніпропетровщина: екстрені відключення в окремих громадах",
+        "Дніпропетровщина: екстрені відключення у деяких містах",
+    )
+    assert all(not covers_house(item, FULL) for item in examples)
