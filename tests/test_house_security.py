@@ -65,6 +65,7 @@ def test_verify_address_invoked_as_module_and_never_sends_telegram():
     assert "python -m scripts.verify_address" in workflow
     assert "python scripts/verify_address.py" not in workflow
     assert "secrets.DTEK_ADDRESS_JSON" in workflow
+    assert "DTEK_WAF_BROWSER" in workflow
     assert "secrets.TELEGRAM_BOT_TOKEN" not in workflow
     import importlib
     verifier=importlib.import_module("scripts.verify_address")
