@@ -246,7 +246,7 @@ def test_partial_cancellation_and_added_interval_explained():
     assert "02:00–03:00" in text
     assert "Додано заплановані" in text
     assert "03:00–04:00" in text
-    assert "Загалом без світла за графіком" in text
+    assert "Загалом за добу за графіком" in text
 
 
 def test_unchanged_intervals_have_no_fake_differences():
