@@ -116,3 +116,19 @@ GitHub Actions намагається перевіряти ДТЕК кожні 5
 
 
 Додаткове правило ДТЕК: **один-єдиний** запис із роздільником `/` або `.` безпосередньо перед літерою допускається як варіант написання номера будинку. Наприклад, `67/А` та `67А`. Номери `1/1` та `11` залишаються різними. За наявності двох можливих записів бот припиняє адресну перевірку. Це технічне зіставлення **не є юридичним підтвердженням** тотожності адрес.
+
+
+## Telegram connection: manual onboarding
+
+Use an existing bot if it is still available through @BotFather. A new bot is not required.
+
+1. Save the BotFather token as GitHub Actions **Repository secret TELEGRAM_BOT_TOKEN**. Update the existing secret when present.
+2. Add the bot to the intended Telegram group. Allow it to post messages.
+3. Send /chatid in the Telegram group. Use /chatid@YourBotUsername when needed.
+4. Open GitHub Actions -> Connect Telegram bot (manual) -> Run workflow. Select **discover**.
+5. Read the negative TELEGRAM_CHAT_ID number in the run log. Save it as **Repository secret TELEGRAM_CHAT_ID**. Caution: logs of this public repository are public.
+6. Run the same workflow in **test** mode. It sends exactly one Telegram test message.
+7. Disable the old bot's previous automation to prevent duplicates. Set GitHub **Repository variable BOT_ENABLED** to **true**.
+8. Run **Check DTEK schedule** manually once and check its GitHub Actions log.
+
+Never enter BotFather tokens into ChatGPT, GitHub Issues or publicly visible repository variables. The helper does not change BOT_ENABLED or DTEK data. Discovery reads recent commands; it can fail when a different consumer or a webhook already receives bot updates.

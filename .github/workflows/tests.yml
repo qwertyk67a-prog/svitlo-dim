@@ -13,6 +13,8 @@ on:
       - .github/dependabot.yml
       - tests/**
       - .github/workflows/tests.yml
+      - .github/workflows/telegram-setup.yml
+      - scripts/telegram_setup.py
   workflow_dispatch:
 permissions:
   contents: read
