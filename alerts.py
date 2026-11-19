@@ -96,9 +96,12 @@ def regional_message(event):
                  "✅ <b>Графіки аварійних відключень скасовано</b>")
         body = ("Погодинний графік може бути неактуальним." if active else
                 "Оновлення стосується аварійного режиму, а не гарантії наявності світла.")
+    reported = event["post"]["date"].astimezone(KYIV).strftime("%d.%m.%Y %H:%M")
     return "\n".join((
         title, f"📍 {html.escape(area)}", "",
-        body, "Це повідомлення про режим у регіоні, а не підтвердження відключення конкретного будинку.",
+        f"Офіційне повідомлення опубліковано: {reported}.",
+        body,
+        "Це повідомлення про режим у регіоні, а не підтвердження відключення конкретного будинку.",
         f'<a href="{html.escape(event["post"]["url"], quote=True)}">Офіційне повідомлення ДТЕК</a>',
     ))
 
@@ -110,7 +113,29 @@ def region_candidates(page, state, now):
     old_id = state.get("official:last_id")
     max_id = max(p["id"] for p in posts)
     if old_id is None:
-        # Never flood the group with a backlog on first deployment.
+        # On first deployment, notify of a RECENT still-active regional
+        # emergency. A newer cancellation overrides an earlier activation.
+        # Older history is ignored to avoid backfilling outdated alerts.
+        latest_by_kind = {}
+        for post in posts:
+            age = now - post["date"]
+            if not timedelta(0) <= age <= timedelta(hours=2):
+                continue
+            event = regional_event(post)
+            if event:
+                latest_by_kind[event["kind"]] = event
+        pending_initial = []
+        for kind, event in latest_by_kind.items():
+            if event["status"] != "active":
+                continue
+            pending_initial.append((
+                event["post"]["id"], f"official:status:{kind}", "active",
+                regional_message(event),
+            ))
+        if pending_initial:
+            # Checkpoint only after successfully notifying residents.
+            pending_initial.append((max_id, "official:last_id", max_id, None))
+            return pending_initial
         state["official:last_id"] = max_id
         LOG.info("Початкова синхронізація офіційного каналу: %d", max_id)
         return []
@@ -253,25 +278,48 @@ def address_event(entry):
     }
 
 
-def address_message(event, changed=False):
+def address_message(event, changed=False, now=None):
+    """Differentiate an already-started outage from a future announcement.
+
+    The official address entry does not provide actual voltage telemetry.
+    The detection time is NOT asserted to be the publication time.
+    """
     titles = {
         "repair": "🛠 <b>Планові ремонтні роботи</b>",
-        "fault": "‼️ <b>Аварійне відключення</b>",
-        "unclassified": "⚠️ <b>Повідомлення про відключення</b>",
+        "fault": "‼️ <b>ДТЕК повідомляє про аварійне відключення</b>",
+        "unclassified": "⚠️ <b>Повідомлення ДТЕК про відключення</b>",
     }
     title = ("🔄 <b>Оновлено дані щодо відключення</b>" if changed
              else titles[event["category"]])
     lines = [title]
+    start = parse_dtek_date(event["start"])
+    finish = parse_dtek_date(event["end"])
+    # A date without a clock time does not establish an exact start moment.
+    has_exact_start = bool(re.fullmatch(
+        r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", event["start"]
+    ))
+    already_started = bool(now and has_exact_start and start and
+                           start < now and (not finish or finish > now))
+    if already_started:
+        lines.append(
+            "⚠️ За даними ДТЕК, зазначений час початку вже минув. "
+            "Відключення могло початися до отримання цього повідомлення."
+        )
     if event["start"]:
-        lines.append("Початок: " + html.escape(event["start"]))
+        lines.append("Зазначений початок: " + html.escape(event["start"]))
     if event["end"]:
         lines.append("Орієнтовне завершення: " + html.escape(event["end"]))
-    # Keep the original address and free-form operational details private.
+        lines.append("Час відновлення може змінитися.")
+    else:
+        lines.append("Орієнтовний час відновлення не зазначено.")
     if event["category"] == "repair":
-        lines.append("Причина: планові роботи")
+        lines.append("Причина за ДТЕК: планові роботи.")
     elif event["category"] == "fault":
-        lines.append("Причина: аварійне відключення")
-    lines.append("Час відновлення може змінитися.")
+        lines.append("Причина за ДТЕК: аварійне відключення.")
+    if now:
+        lines.append("Інформацію виявлено: " +
+                     now.astimezone(KYIV).strftime("%d.%m.%Y %H:%M") + ".")
+    lines.append("Бот не вимірює фактичну наявність електроенергії.")
     lines.append(f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>')
     return "\n".join(lines)
 
@@ -316,7 +364,7 @@ def address_decision(entry, state, now, expected="GPV6.2"):
                 "end": event["end"],
                 "status": "active",
             }, address_message(event, changed=isinstance(old, dict) and
-                               old.get("status") == "active")))
+                               old.get("status") == "active", now=now)))
     elif isinstance(old, dict) and old.get("status") == "active":
         msg = address_clear_message({"end": old.get("end") or (old.get("event") or {}).get("end", "")}, now)
         result.append(("address", key, {"status": "inactive"}, msg))
