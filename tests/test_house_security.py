@@ -57,3 +57,15 @@ def test_single_house_does_not_implement_user_enumeration():
     for forbidden in ("getChatAdministrators","getChatMemberCount",
                       "getUpdates","setWebhook","sendDocument","sendPhoto"):
         assert forbidden not in content
+
+
+def test_verify_address_invoked_as_module_and_never_sends_telegram():
+    """Direct script execution loses repository-root imports in Actions."""
+    workflow=(ROOT/".github/workflows/verify-address.yml").read_text()
+    assert "python -m scripts.verify_address" in workflow
+    assert "python scripts/verify_address.py" not in workflow
+    assert "secrets.DTEK_ADDRESS_JSON" in workflow
+    assert "secrets.TELEGRAM_BOT_TOKEN" not in workflow
+    import importlib
+    verifier=importlib.import_module("scripts.verify_address")
+    assert callable(verifier.main)
