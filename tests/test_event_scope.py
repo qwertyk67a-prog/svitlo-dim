@@ -140,3 +140,32 @@ def test_specific_other_house_on_our_street_is_not_relevant():
     assert not covers_house(
         "Кривий Ріг: частково знеструмлена вул. Інша",FULL
     )
+
+
+
+def test_explicit_exclusion_of_unrelated_city_does_not_silence_our_oblast():
+    assert covers_house(
+        "Дніпропетровщина: відключення по всій Дніпропетровській області, "
+        "крім Нікополя", FULL
+    )
+    assert not covers_house(
+        "Дніпропетровщина: відключення по всій Дніпропетровській області, "
+        "крім Кривого Рогу", FULL
+    )
+
+
+def test_excluding_other_district_keeps_our_district_notification():
+    assert covers_house(
+        "Кривий Ріг: екстрені відключення по всьому місту, "
+        "крім Центрального району",FULL
+    )
+    assert not covers_house(
+        "Кривий Ріг: екстрені відключення по всьому місту, "
+        "крім Покровського району",FULL
+    )
+
+
+def test_unrecognized_exception_remains_silent_instead_of_guessing():
+    assert not covers_house(
+        "Дніпропетровщина: запроваджені обмеження крім деяких районів", FULL
+    )
