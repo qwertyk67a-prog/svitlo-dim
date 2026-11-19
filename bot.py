@@ -154,6 +154,30 @@ def describe_changes(previous, current):
     return lines
 
 
+def upcoming_spans(day, spans, observed_at):
+    """Keep current/future GPV intervals; ignore those fully over today.
+
+    This does not prove electricity has returned. It only avoids disturbing
+    residents with late official information about a past interval.
+    """
+    if observed_at is None or day != observed_at.astimezone(KYIV).date():
+        return list(spans or ())
+    t = observed_at.astimezone(KYIV)
+    minute = t.hour * 60 + t.minute
+    return [tuple(s) for s in (spans or ()) if s[1] > minute]
+
+
+def upcoming_signature(day, spans, observed_at):
+    """Compare only remaining plan, clipped at the moment of observation."""
+    remaining = upcoming_spans(day, spans, observed_at)
+    if observed_at is None or day != observed_at.astimezone(KYIV).date():
+        return remaining
+    t = observed_at.astimezone(KYIV)
+    minute = t.hour * 60 + t.minute
+    return [(max(start, minute), end, status)
+            for start, end, status in remaining]
+
+
 def newly_current_schedule_outage(day, spans, previous, observed_at):
     """A DTEK-confirmed slot covers NOW but prior published plan did not.
 
@@ -214,13 +238,14 @@ def day_message(day, group, spans, updated=None, event="new", previous=None, obs
     return "\n".join(lines)
 
 
-def cancellation_message(day, group, updated=None):
+def cancellation_message(day, group, updated=None, remaining_today=False):
     """Cancellation is a meaningful change only after a prior outage notice."""
     lines = [
         "✅ <b>Планові відключення скасовано</b>",
         f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
         "",
-        "За оновленим графіком планових відключень немає.",
+        ("На решту дня відключення за оновленим графіком не заплановані."
+         if remaining_today else "За оновленим графіком планових відключень немає."),
     ]
     if updated:
         lines.append("\nОновлено: " + html.escape(str(updated)))
@@ -610,23 +635,66 @@ async def once():
                 }
                 if kind == "day":
                     day, spans, updated = parts
-                    event = ("resumed" if previous_status == "cancelled" else
-                             "changed" if previous_status == "outages" else "new")
                     old_spans = None
                     if isinstance(old, dict) and isinstance(old.get("spans"), list):
                         old_spans = [tuple(item) for item in old["spans"]]
-                    late_now = newly_current_schedule_outage(
-                        day, spans, old_spans, now
-                    )
-                    message = day_message(
-                        day, group, spans, updated, event=event,
-                        previous=old_spans, observed_at=now,
-                    )
+                    new_visible = upcoming_spans(day, spans, now)
+                    old_visible = upcoming_spans(day, old_spans, now)
                     next_state["spans"] = [list(span) for span in spans]
-                    priority = 1 if late_now else 2 if event == "changed" else 4
+
+                    # DTEK only published already-ended slots for today:
+                    # do not announce an incident that is over.
+                    if day == today and not new_visible and not old_visible:
+                        next_state["status"] = "historical_only"
+                        state[key] = next_state
+                        state_write(path, state)
+                        continue
+
+                    # A previous relevant outage was removed and the new
+                    # GPV has nothing left for today: this is useful news.
+                    if day == today and not new_visible and old_visible:
+                        next_state["status"] = "cancelled"
+                        message = cancellation_message(
+                            day, group, updated, remaining_today=True
+                        )
+                        priority = 2
+                    else:
+                        # DTEK may edit only an already-ended time range.
+                        # That is not a change to the remaining plan.
+                        if (day == today and old_spans is not None and
+                                upcoming_signature(day, old_spans, now) ==
+                                upcoming_signature(day, spans, now) and
+                                previous_status == "outages"):
+                            state[key] = next_state
+                            state_write(path, state)
+                            continue
+
+                        event = ("resumed" if previous_status == "cancelled" else
+                                 "changed" if previous_status == "outages" else "new")
+                        late_now = newly_current_schedule_outage(
+                            day, spans, old_spans, now
+                        )
+                        message = day_message(
+                            day, group, new_visible, updated, event=event,
+                            previous=old_visible, observed_at=now,
+                        )
+                        priority = 1 if late_now else 2 if event == "changed" else 4
                 elif kind == "day_cancel":
                     day, updated = parts
-                    message = cancellation_message(day, group, updated)
+                    old_spans = (
+                        [tuple(item) for item in old["spans"]]
+                        if isinstance(old, dict) and isinstance(old.get("spans"), list)
+                        else None
+                    )
+                    if day == today and old_spans is not None and not upcoming_spans(
+                            day, old_spans, now):
+                        next_state["status"] = "cancelled"
+                        state[key] = next_state
+                        state_write(path, state)
+                        continue
+                    message = cancellation_message(
+                        day, group, updated, remaining_today=day == today
+                    )
                     priority = 2
                 elif kind == "week":
                     monday, entries = parts
