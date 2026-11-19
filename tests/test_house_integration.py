@@ -178,7 +178,8 @@ def test_missing_address_data_never_sends_false_queue_change(tmp_path, monkeypat
     async def should_not_run(*args):
         raise AssertionError("No queue schedule should be sent without confirmation")
     monkeypatch.setattr(bot,"get_schedule",should_not_run)
-    asyncio.run(bot.once())
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
     assert calls == []
     assert "house:groups" not in json.loads(state_file.read_text())
 
@@ -376,7 +377,8 @@ def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypat
         called.append(args)
         return fake_schedule()
     monkeypatch.setattr(bot, "get_schedule", schedules)
-    asyncio.run(bot.once())
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
     assert called == []
 
 
@@ -487,7 +489,8 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
     messages=[]
     monkeypatch.setattr(bot,"telegram_send",
                         lambda _t,_c,txt,deadline=None: messages.append(txt))
-    asyncio.run(bot.once())
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
     assert len(messages)==1
     assert "екстрені" in messages[0].casefold()
 
