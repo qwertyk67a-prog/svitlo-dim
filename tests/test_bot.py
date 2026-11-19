@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bot import (
     cancellation_message, collect_notifications, day_message, duration,
     fingerprint, intervals, minutes_text, parse_verified, state_digest,
+    newly_current_schedule_outage,
     state_status, time_range, weekly_cancellation_message, weekly_message,
 )
 
@@ -256,3 +257,35 @@ def test_unchanged_intervals_have_no_fake_differences():
     text = day_message(TODAY, GROUP, spans, event="changed", previous=spans)
     assert "Прибрано із запланованих" not in text
     assert "Додано заплановані" not in text
+
+
+
+def test_late_daily_schedule_change_alerts_that_slot_covers_current_time():
+    current_time=datetime(2026,11,8,16,30,tzinfo=KYIV)
+    current=[(16*60,18*60,"off")]
+    previous=[(19*60,21*60,"off")]
+    assert newly_current_schedule_outage(TODAY,current,previous,current_time)
+    notice=day_message(
+        TODAY,GROUP,current,event="changed",previous=previous,
+        observed_at=current_time,
+    )
+    assert "час відключення вже настав" in notice
+    assert "не підтверджує стан електропостачання" in notice
+    assert "Графік відключень змінено" in notice
+    assert "Прибрано із запланованих" in notice
+
+
+def test_no_late_warning_when_slot_was_already_scheduled():
+    moment=datetime(2026,11,8,16,30,tzinfo=KYIV)
+    current=[(16*60,18*60,"off")]
+    assert not newly_current_schedule_outage(TODAY,current,current,moment)
+    notice=day_message(TODAY,GROUP,current,event="changed",
+                       previous=current,observed_at=moment)
+    assert "час відключення вже настав" not in notice
+
+
+def test_no_late_warning_for_future_or_tomorrow_or_only_possible_slot():
+    now=datetime(2026,11,8,16,30,tzinfo=KYIV)
+    assert not newly_current_schedule_outage(TODAY,[(17*60,18*60,"off")],None,now)
+    assert not newly_current_schedule_outage(TOMORROW,[(16*60,18*60,"off")],None,now)
+    assert not newly_current_schedule_outage(TODAY,[(16*60,18*60,"maybe")],None,now)
