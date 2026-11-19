@@ -20,4 +20,4 @@ jobs:
       - name: Check queues without posting messages
         env:
           DTEK_ADDRESS_JSON: ${{ secrets.DTEK_ADDRESS_JSON }}
-        run: python scripts/verify_address.py
+        run: python -m scripts.verify_address
