@@ -143,6 +143,11 @@ def _exclusion_might_include_house(text, scope):
         return True
     districts = DISTRICT_NAME.findall(exception)
     if districts:
+        # "крім деяких районів" does not identify which districts.
+        if any(re.match(
+            r"^(?:деяк|окрем|кільк|інш|певн|частин|невідом)\w*", name
+        ) for name in districts):
+            return True
         configured = scope.get("district", "")
         return not configured or any(
             _district_matches(name, configured) for name in districts
