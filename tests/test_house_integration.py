@@ -490,3 +490,30 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
     asyncio.run(bot.once())
     assert len(messages)==1
     assert "екстрені" in messages[0].casefold()
+
+
+def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch,state_file)
+    setup_address(monkeypatch)
+    import alerts
+    from types import SimpleNamespace
+    async def two_queues(_secret):
+        return SimpleNamespace(group_ids=["GPV5.1","GPV6.2"],
+                               outage_type="",start_date=None,
+                               end_date=None,sub_type=None)
+    monkeypatch.setattr(alerts,"fetch_address_status",two_queues)
+    async def load(groups):
+        source, _ = fake_schedule(days=1)
+        dt = datetime.now(KYIV).date()
+        stamp = str(int(datetime(dt.year,dt.month,dt.day,tzinfo=KYIV).timestamp()))
+        source.fact.days[stamp]["GPV5.1"] = dict(source.fact.days[stamp]["GPV6.2"])
+        return source,list(groups)
+    monkeypatch.setattr(bot,"get_schedule",load)
+    sent=[]
+    monkeypatch.setattr(bot,"telegram_send",
+                        lambda _t,_c,text,deadline=None:sent.append(text))
+    asyncio.run(bot.once())
+    schedules=[x for x in sent if "Графік відключень" in x]
+    assert len(schedules)==2
+    assert all("Розподіл квартир між чергами не підтверджено" in x for x in schedules)

@@ -186,3 +186,16 @@ def test_named_other_towns_in_plural_is_not_whole_oblast():
         "Дніпропетровщина: запроваджено екстрені відключення "
         "у містах Нікополь та Павлоград", FULL
     )
+
+
+def test_named_other_cities_without_whole_region_are_silent():
+    examples = [
+        "Дніпропетровщина: після обстрілу знеструмлено Дніпро та Павлоград",
+        "Дніпропетровщина: знеструмлено Синельникове",
+        "Дніпропетровщина: без світла мешканці Нікополя і Кам'янського",
+    ]
+    assert all(not covers_house(x, FULL) for x in examples)
+    assert covers_house(
+        "Дніпропетровщина: екстрені відключення по всій області, "
+        "включно з Дніпром і Павлоградом", FULL
+    )

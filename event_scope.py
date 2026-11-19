@@ -262,6 +262,20 @@ def coverage_for_house(announcement, scope):
 
     if OTHER_CITY.search(affected) and not any(name in affected for name in CITY_NAMES):
         return None
+    named_other_places = re.search(
+        r"\b(?:дніпро|дніпра|дніпрі|нікопол\w*|павлоград\w*|"
+        r"кам['’]?янськ\w*|самар(?:а|у|і|ом|івськ\w*)?|"
+        r"синельник\w*|марганц\w*|марганець|тернівк\w*|"
+        r"апостолов\w*|зеленодольськ\w*)\b", affected,
+    )
+    explicitly_whole_region = bool(re.search(
+        r"(?:по|на|в|у)\s+всій\s+(?:дніпропетровщин\w*|област\w*)|"
+        r"на\s+всій\s+територі\w*\s+област\w*|"
+        r"всій\s+дніпропетровськ\w*\s+област\w*", affected,
+    ))
+    if named_other_places and not explicitly_whole_region and not any(
+            name in affected for name in CITY_NAMES):
+        return None
     if OTHER_REGION.search(affected) and not (
         "дніпропетровськ" in affected or any(name in affected for name in REGION_NAMES)
     ):
