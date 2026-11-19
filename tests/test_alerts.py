@@ -530,7 +530,7 @@ def test_older_post_with_future_official_end_is_relevant():
     notices = [x for x in scoped_candidates(
         page, {"official:last_id": 19}, NOW) if x[3]]
     assert len(notices) == 1
-    assert notices[0][2]["end"].endswith("19:00:00")
+    assert datetime.fromisoformat(notices[0][2]["end"]).hour == 19
 
 
 def test_official_repeated_active_with_revised_end_notified():
