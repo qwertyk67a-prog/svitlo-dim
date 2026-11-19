@@ -229,3 +229,111 @@ def test_migrating_old_queue_hold_does_not_pause_anymore(tmp_path,monkeypatch):
     assert "house:queue_hold" not in json.loads(state_file.read_text())
     assert any("5.1" in m and "Додано" in m for m in calls)
     assert any("Графік відключень" in m for m in calls)
+
+
+
+class _FixedDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 11, 19, 20, 30, tzinfo=tz or KYIV)
+
+
+def _late_schedule(slots):
+    day=_FixedDatetime.now(KYIV).date()
+    stamp=str(int(datetime(day.year,day.month,day.day,tzinfo=KYIV).timestamp()))
+    return SimpleNamespace(
+        preset=SimpleNamespace(
+            is_active=False,
+            time_zone={"1":"00-12","2":"12-20","3":"20-24"},
+            groups={},
+        ),
+        fact=SimpleNamespace(days={stamp:{"GPV6.2":slots}},
+                             update="19.11.2026 20:28"),
+    ),["GPV6.2"]
+
+
+def _late_test_setup(tmp_path,monkeypatch,initial):
+    path=tmp_path/"late_state.json"
+    setup(monkeypatch,path)
+    monkeypatch.setattr(bot,"datetime",_FixedDatetime)
+    current={"source":initial}
+    async def load():
+        return _late_schedule(current["source"])
+    monkeypatch.setattr(bot,"get_schedule",load)
+    sent=[]
+    monkeypatch.setattr(bot,"telegram_send",
+                        lambda _t,_c,body,deadline=None:sent.append(body))
+    return path,current,sent
+
+
+def test_outage_published_after_it_ended_is_silent(tmp_path,monkeypatch):
+    path,current,sent=_late_test_setup(
+        tmp_path,monkeypatch,
+        {"1":"no","2":"no","3":"yes"},
+    )
+    asyncio.run(bot.once())
+    asyncio.run(bot.once())
+    assert sent == []
+    state=json.loads(path.read_text())
+    key="2026-11-19:GPV6.2"
+    assert state[key]["status"]=="historical_only"
+    # The next update adds an ongoing outage. Only that new information matters.
+    current["source"]={"1":"no","2":"no","3":"no"}
+    asyncio.run(bot.once())
+    assert len(sent)==1
+    assert "Графік відключень" in sent[0]
+    assert "час відключення вже настав" in sent[0]
+
+
+def test_outage_start_past_but_end_future_triggers_notice(tmp_path,monkeypatch):
+    path,current,sent=_late_test_setup(
+        tmp_path,monkeypatch,
+        {"1":"yes","2":"yes","3":"no"},
+    )
+    asyncio.run(bot.once())
+    assert len(sent)==1
+    assert "20:00–24:00" in sent[0]
+    assert "час відключення вже настав" in sent[0]
+
+
+def test_past_only_change_does_not_repeat_sent_ongoing_schedule(tmp_path,monkeypatch):
+    path,current,sent=_late_test_setup(
+        tmp_path,monkeypatch,
+        {"1":"no","2":"yes","3":"no"},
+    )
+    asyncio.run(bot.once())
+    assert len(sent)==1
+    current["source"]={"1":"yes","2":"yes","3":"no"}
+    asyncio.run(bot.once())
+    assert len(sent)==1
+    asyncio.run(bot.once())
+    assert len(sent)==1
+
+
+def test_today_schedule_removes_active_outage_and_notifies(tmp_path,monkeypatch):
+    path,current,sent=_late_test_setup(
+        tmp_path,monkeypatch,
+        {"1":"yes","2":"yes","3":"no"},
+    )
+    asyncio.run(bot.once())
+    assert len(sent)==1
+    current["source"]={"1":"no","2":"yes","3":"yes"}
+    asyncio.run(bot.once())
+    assert len(sent)==2
+    assert "На решту дня" in sent[1]
+    assert "скасовано" in sent[1]
+    asyncio.run(bot.once())
+    assert len(sent)==2
+
+
+def test_only_old_finished_outage_added_to_new_graph_no_notice(
+        tmp_path,monkeypatch):
+    path,current,sent=_late_test_setup(
+        tmp_path,monkeypatch,
+        {"1":"yes","2":"yes","3":"yes"},
+    )
+    asyncio.run(bot.once())
+    assert sent == []
+    current["source"]={"1":"no","2":"yes","3":"yes"}
+    asyncio.run(bot.once())
+    assert sent == []
