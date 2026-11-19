@@ -164,6 +164,22 @@ def regional_message(event):
     ))
 
 
+def published_event_end(post):
+    """Only trust an explicitly dated end timestamp in an official post.
+
+    An undated "до 18:00" is ambiguous across days; do not infer it.
+    """
+    text = post["text"].casefold()
+    raw = re.search(
+        r"(?:орієнтовн\w*\s+(?:завершенн\w*|відновленн\w*)|"
+        r"завершенн\w*|відновленн\w*|до)\s*[:—–\-]?\s*"
+        r"(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}|"
+        r"\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})",
+        text,
+    )
+    return parse_dtek_date(raw.group(1)) if raw else None
+
+
 def region_candidates(page, state, now, scope=None):
     posts = official_posts(page)
     if not posts:
@@ -183,6 +199,10 @@ def region_candidates(page, state, now, scope=None):
             event = regional_event(post)
             coverage = coverage_for_house(post["text"], scope) if event else None
             if event and coverage:
+                if (event["status"] == "active" and
+                        (end := published_event_end(post)) and end <= now):
+                    # The incident was already over before this first poll.
+                    event = {**event, "status": "ended"}
                 event["coverage"] = coverage
                 latest_by_kind[(event["kind"], coverage["level"])] = event
         pending_initial = []
@@ -205,7 +225,10 @@ def region_candidates(page, state, now, scope=None):
     except (ValueError, TypeError):
         raise RuntimeError("Некоректний стан останнього офіційного повідомлення")
     pending = []
-    simulated = {}
+    # Inspect the latest relevant official status BEFORE sending anything.
+    # If both start and end arrived while the bot was polling, the incident
+    # had already ended and must not generate an obsolete alert.
+    latest = {}
     for post in posts:
         if post["id"] <= old_id:
             continue
@@ -213,21 +236,24 @@ def region_candidates(page, state, now, scope=None):
         coverage = coverage_for_house(post["text"], scope) if event else None
         if not event or not coverage:
             continue
-        event["coverage"] = coverage
         if post["date"] > now + timedelta(minutes=10):
             continue
         if now - post["date"] > timedelta(hours=6):
             continue
-        # Track transitions within a batch, not just the saved initial state.
+        if (event["status"] == "active" and
+                (finish := published_event_end(post)) and finish <= now):
+            event = {**event, "status": "ended"}
+        event["coverage"] = coverage
         key = f"official:status:{event['kind']}:{coverage['level']}"
-        previous = simulated.get(key, state.get(key, "unknown"))
-        if event["status"] == "active":
-            if previous != "active":
-                pending.append((post["id"], key, "active", regional_message(event)))
-                simulated[key] = "active"
-        elif previous == "active":
-            pending.append((post["id"], key, "ended", regional_message(event)))
-            simulated[key] = "ended"
+        latest[key] = (post["id"], event)
+
+    for key, (post_id, event) in sorted(
+            latest.items(), key=lambda item: item[1][0]):
+        old_status = state.get(key, "unknown")
+        if event["status"] == "active" and old_status != "active":
+            pending.append((post_id, key, "active", regional_message(event)))
+        elif event["status"] == "ended" and old_status == "active":
+            pending.append((post_id, key, "ended", regional_message(event)))
     # A final checkpoint never triggers an outgoing message.
     # The caller saves it only after prior sends succeed.
     pending.append((max(old_id, max_id), "official:last_id",
