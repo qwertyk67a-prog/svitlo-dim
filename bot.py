@@ -209,6 +209,8 @@ def day_message(day, group, spans, updated=None, event="new", previous=None,
     lines = [
         titles[event],
         f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
+        "✅ <b>Добовий графік ДТЕК має пріоритет</b> над попереднім "
+        "тижневим прогнозом на цю дату.",
     ]
     if newly_current_schedule_outage(day, spans, previous, observed_at):
         lines.extend([
@@ -256,9 +258,22 @@ def cancellation_message(day, group, updated=None, remaining_today=False):
     return "\n".join(lines)
 
 
-def weekly_message(monday, group, entries, changed=False):
-    """Separate, clearly preliminary Ukrainian weekly forecast."""
-    if not entries:
+def weekly_message(monday, group, entries, changed=False,
+                   observed_at=None, confirmed_days=()):
+    """Show only relevant weekly preview days not covered by DTEK daily facts.
+
+    This is PRESENTATION ONLY: weekly candidate fingerprints remain based on
+    the original seven-day forecast, so the passage of midnight never causes
+    a duplicate "forecast changed" notification.
+    """
+    confirmed = set(confirmed_days)
+    current_day = (observed_at.astimezone(KYIV).date()
+                   if observed_at is not None else monday)
+    visible = [
+        (day, spans) for day, spans in entries
+        if day >= current_day and day not in confirmed
+    ]
+    if not visible:
         return None
     sunday = monday + timedelta(days=6)
     lines = [
@@ -267,10 +282,14 @@ def weekly_message(monday, group, entries, changed=False):
         f"Черга {html.escape(group.removeprefix('GPV'))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
     ]
     weekdays = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
-    for day, spans in entries:
+    for day, spans in visible:
         lines.append(f"\n<b>{weekdays[day.weekday()]} {day:%d.%m}</b>")
         lines.extend(f"• {clock(a)}–{clock(b)}" for a, b in spans)
-    lines.append("\n⚠️ Попередній прогноз. Точний графік на день публікується окремо.")
+    lines.append(
+        "\n⚠️ Попередній прогноз можливих відключень. "
+        "Минулі дати та дні з підтвердженим добовим графіком не показані. "
+        "Для таких днів використовуйте окремий добовий графік ДТЕК."
+    )
     lines.append(f'<a href="{SOURCE}">Джерело: ДТЕК</a>')
     return "\n".join(lines)
 
@@ -738,8 +757,23 @@ async def once():
                     priority = 2
                 elif kind == "week":
                     monday, entries = parts
-                    message = weekly_message(monday, group, entries,
-                                             changed=previous_status == "outages")
+                    confirmed_days = set()
+                    if source.fact:
+                        for stamp, group_map in source.fact.days.items():
+                            confirmed_day = datetime.fromtimestamp(
+                                int(stamp), KYIV
+                            ).date()
+                            slots = group_map.get(group)
+                            if parse_verified(
+                                slots, source.preset.time_zone
+                            ) is not None:
+                                confirmed_days.add(confirmed_day)
+                    message = weekly_message(
+                        monday, group, entries,
+                        changed=previous_status == "outages",
+                        observed_at=now,
+                        confirmed_days=confirmed_days,
+                    )
                     priority = 7
                 elif kind == "week_cancel":
                     message = weekly_cancellation_message(parts[0], group)
