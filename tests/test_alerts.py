@@ -120,7 +120,7 @@ def test_first_run_recent_active_emergency_notified_once():
     results=scoped_candidates(page,state,NOW)
     sends=[x for x in results if x[3]]
     assert len(sends)==1
-    assert sends[0][2]=="active"
+    assert sends[0][2]["status"]=="active"
     assert "Офіційне повідомлення опубліковано" in sends[0][3]
     assert "не підтверджує відключення кожної квартири" in sends[0][3]
     assert "official:last_id" not in state
@@ -250,7 +250,7 @@ def test_early_clear_vs_natural_end():
     assert address_clear_message(old["event"],NOW+timedelta(hours=5)) is None
     state={"address:last_outage":old,"address:groups":["GPV6.2"]}
     changes=address_decision(house(),state,NOW)
-    assert len([r for r in changes if r[3]])==1
+    assert not [r for r in changes if r[3]]  # missing API data is not an official cancellation
 
 
 def test_change_of_house_group_only_after_baseline():
@@ -470,8 +470,8 @@ def test_existing_ongoing_outage_ending_early_notifies_cancel():
                 start="08.11.2026 12:00",end="08.11.2026 15:00")
     rows=address_decision(event,old,NOW)
     msg=next(x[3] for x in rows if x[1]=="address:last_outage")
-    assert "більше не відображається" in msg
-    assert "не підтверджує фактичну наявність світла" in msg
+    assert "уточнив орієнтовний час" in msg
+    assert "не підтверджено" in msg
 
 
 def test_official_emergency_ended_before_first_observation_is_silent():
@@ -493,7 +493,7 @@ def test_official_emergency_end_still_notifies_if_started_was_previously_sent():
     rows=scoped_candidates(page,state,NOW)
     ends=[r for r in rows if r[3]]
     assert len(ends)==1
-    assert ends[0][2]=="ended"
+    assert ends[0][2]["status"]=="ended"
 
 
 def test_post_with_explicitly_elapsed_end_never_starts_outage_notice():
@@ -510,3 +510,74 @@ def test_post_with_future_explicit_end_is_not_suppressed():
         "Орієнтовне завершення: 08.11.2026 18:00",NOW-timedelta(minutes=4))])
     rows=scoped_candidates(page,{"official:last_id":19},NOW)
     assert len([r for r in rows if r[3]])==1
+
+
+def test_direct_ukrenergo_order_without_colon_is_parsed():
+    page = html_page([fake_post(20,
+        "За командою Укренерго на Дніпропетровщині запроваджено "
+        "екстрені відключення")])
+    notices = [x for x in scoped_candidates(
+        page, {"official:last_id": 19}, NOW) if x[3]]
+    assert len(notices) == 1
+    assert "Запроваджено екстрені" in notices[0][3]
+
+
+def test_older_post_with_future_official_end_is_relevant():
+    page = html_page([fake_post(22,
+        "Дніпропетровщина: запроваджено екстрені відключення. "
+        "Орієнтовне завершення: 08.11.2026 19:00",
+        NOW - timedelta(hours=9))])
+    notices = [x for x in scoped_candidates(
+        page, {"official:last_id": 19}, NOW) if x[3]]
+    assert len(notices) == 1
+    assert notices[0][2]["end"].endswith("19:00:00")
+
+
+def test_official_repeated_active_with_revised_end_notified():
+    state = {"official:last_id": 10}
+    first = html_page([fake_post(11,
+        "Дніпропетровщина: запроваджено екстрені відключення. "
+        "Орієнтовне завершення: 08.11.2026 18:00")])
+    for _id, key, value, _message in scoped_candidates(first, state, NOW):
+        state[key] = value
+    changed = html_page([fake_post(12,
+        "Дніпропетровщина: екстрені відключення тривають. "
+        "Орієнтовне завершення: 08.11.2026 20:00")])
+    notices = [x for x in scoped_candidates(changed, state, NOW) if x[3]]
+    assert len(notices) == 1
+    assert "уточнив строки" in notices[0][3]
+    for _id, key, value, _message in notices:
+        state[key] = value
+    state["official:last_id"] = 12
+    assert not [x for x in scoped_candidates(changed, state, NOW) if x[3]]
+
+
+def test_regional_record_tracks_only_public_metadata():
+    page = html_page([fake_post(21,
+        "Дніпропетровщина: запроваджено екстрені відключення")])
+    message = next(x for x in scoped_candidates(
+        page, {"official:last_id": 20}, NOW) if x[3])
+    record = message[2]
+    assert {"operator", "source", "published", "detected", "start",
+            "end", "area", "status", "event_id"} <= set(record)
+    assert "Умовна" not in str(record) and "12Г" not in str(record)
+
+
+def test_missing_address_entry_is_not_early_cancellation():
+    state = {"address:last_outage": {
+        "status": "active", "end": "08.11.2026 19:00",
+        "digest": "old",
+    }}
+    entries = (house(), None)
+    for entry in entries:
+        if entry is None:
+            assert address_decision(entry, state, NOW) == []
+        else:
+            assert not [x for x in address_decision(entry, state, NOW) if x[3]]
+
+
+def test_address_date_only_end_is_not_treated_as_expired():
+    current = house(reason="Аварійні роботи", kind="2",
+                    start="08.11.2026 10:00", end="08.11.2026")
+    rows = address_decision(current, {}, NOW)
+    assert any(x[1] == "address:last_outage" and x[3] for x in rows)
