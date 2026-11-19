@@ -33,6 +33,7 @@ def setup(monkeypatch,path):
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
     monkeypatch.setenv("REMINDER_MINUTES","0")
     monkeypatch.delenv("DTEK_ADDRESS_JSON",raising=False)
+    monkeypatch.setenv("ALLOW_UNVERIFIED_GROUP","true")
     monkeypatch.delenv("QUEUE_APPROVAL",raising=False)
 
 
@@ -337,3 +338,72 @@ def test_only_old_finished_outage_added_to_new_graph_no_notice(
     current["source"]={"1":"no","2":"yes","3":"yes"}
     asyncio.run(bot.once())
     assert sent == []
+
+
+def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
+    """The address endpoint is not a single point of failure."""
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    setup_address(monkeypatch)
+    import alerts
+    async def unavailable(_secret):
+        raise RuntimeError("DTEK temporary error")
+    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
+    state_file.write_text(json.dumps({"house:groups": ["GPV6.2"]}), encoding="utf-8")
+    checked = []
+    async def schedules(groups):
+        checked.append(groups)
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    messages = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda _t, _c, msg, deadline=None: messages.append(msg))
+    asyncio.run(bot.once())
+    assert checked == [("GPV6.2",)]
+    assert len(messages) == 1
+
+
+def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    setup_address(monkeypatch)
+    import alerts
+    async def unavailable(_secret):
+        raise RuntimeError("DTEK temporary error")
+    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
+    called = []
+    async def schedules(*args):
+        called.append(args)
+        return fake_schedule()
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    asyncio.run(bot.once())
+    assert called == []
+
+
+def test_no_address_is_disabled_unless_explicitly_approved(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.delenv("ALLOW_UNVERIFIED_GROUP")
+    called = []
+    async def schedules(*args):
+        called.append(args)
+        return fake_schedule()
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    asyncio.run(bot.once())
+    assert called == []
+
+
+def test_dry_run_never_sends_telegram(tmp_path, monkeypatch):
+    state_file = tmp_path / "dry-run-only.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    async def schedules():
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                            AssertionError("DRY_RUN must never send")))
+    asyncio.run(bot.once())
+    assert json.loads(state_file.read_text())

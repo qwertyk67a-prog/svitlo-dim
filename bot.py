@@ -514,9 +514,10 @@ async def once():
         trim_state, verified_house_queues,
     )
 
+    dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat:
+    if not dry_run and (not token or not chat):
         raise RuntimeError("Відсутні TELEGRAM_BOT_TOKEN або TELEGRAM_CHAT_ID")
 
     path = Path(os.getenv("STATE_PATH", "data/state.json"))
@@ -538,6 +539,10 @@ async def once():
     queue_change = None
     regional_scope = None
     private_address = os.getenv("DTEK_ADDRESS_JSON", "").strip()
+    allow_unverified = os.getenv("ALLOW_UNVERIFIED_GROUP", "false").lower() == "true"
+    if not private_address and not allow_unverified:
+        LOG.warning("Адресу ДТЕК не налаштовано; невизначену чергу не публікуємо")
+        return
     if private_address:
         try:
             from alerts import fetch_address_status
@@ -558,9 +563,15 @@ async def once():
         except Exception as exc:
             LOG.warning("Не вдалося перевірити черги за адресою: %s",
                         type(exc).__name__)
-            # Missing or ambiguous address data are not a queue change.
-            # Refuse to publish a potentially incorrect fixed queue.
-            return
+            # A failed address request must NOT stop the official news feed.
+            # Only previously verified, persisted queues may supply GPV facts.
+            cached = state.get("house:groups")
+            if cached:
+                try:
+                    house_groups = verified_house_queues(cached)
+                    LOG.warning("Використовую останні підтверджені черги будинку")
+                except ValueError:
+                    house_groups = None
     elif state.get("house:queue_hold"):
         LOG.warning("Раніше чергу не підтверджено; потрібен секрет адреси")
         return
@@ -610,10 +621,12 @@ async def once():
             LOG.warning("Адресні події недоступні: %s", type(exc).__name__)
 
     try:
-        source, groups = await (
-            get_schedule(house_groups) if house_groups is not None
-            else get_schedule()
-        )
+        if house_groups is not None:
+            source, groups = await get_schedule(house_groups)
+        elif allow_unverified and not private_address:
+            source, groups = await get_schedule()
+        else:
+            source, groups = None, []
     except Exception as exc:
         LOG.error("Графік ДТЕК недоступний: %s", type(exc).__name__)
         source, groups = None, []
@@ -740,7 +753,10 @@ async def once():
             LOG.info("Пропущено прострочене нагадування: %s", key)
             continue
         try:
-            telegram_send(token, chat, message, deadline=deadline)
+            if dry_run:
+                LOG.info("DRY-RUN: сформовано сповіщення %s; Telegram не викликано", key)
+            else:
+                telegram_send(token, chat, message, deadline=deadline)
         except Exception as exc:
             if origin == "official":
                 official_failed = True
@@ -753,7 +769,7 @@ async def once():
         state[key] = value
         state_write(path, state)
         sent += 1
-        LOG.info("Надіслано: %s", key)
+        LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", key)
 
     LOG.info("Нових сповіщень: %d; помилок доставки: %d", sent, len(problems))
     if problems:

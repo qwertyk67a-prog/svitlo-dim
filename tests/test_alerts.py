@@ -581,3 +581,17 @@ def test_address_date_only_end_is_not_treated_as_expired():
                     start="08.11.2026 10:00", end="08.11.2026")
     rows = address_decision(current, {}, NOW)
     assert any(x[1] == "address:last_outage" and x[3] for x in rows)
+
+
+def test_house_number_separators_not_confused():
+    assert normalized_house("1/1") != normalized_house("11")
+    assert normalized_house("67-А") == normalized_house("67А")
+    assert normalized_house("67/А") != normalized_house("67А")
+
+
+def test_regional_transition_to_gpv_ends_emergency():
+    e = regional_event(fake_post(
+        101, "Дніпропетровщина: за командою Укренерго "
+             "переходимо до стабілізаційних графіків відключень"
+    ))
+    assert e and e["kind"] == "emergency" and e["status"] == "ended"

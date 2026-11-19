@@ -79,7 +79,15 @@ def regional_event(post):
         context,
     ):
         return None
-    if re.search(r"\b(?:гав|графік\w*\s+аварійн\w*\s+відключен\w*)\b", context):
+    restore_gpv = bool(re.search(
+        r"(?:переходимо|повертаємось|повертаємося|перейшли|повернулися)\s+"
+        r"(?:до|на)\s+(?:стабілізаційн\w*\s+)?графік\w*|"
+        r"(?:відновлен\w*|відновили)\s+(?:дію\s+)?стабілізаційн\w*\s+графік\w*",
+        context,
+    ))
+    if restore_gpv:
+        kind = "emergency"
+    elif re.search(r"\b(?:гав|графік\w*\s+аварійн\w*\s+відключен\w*)\b", context):
         kind = "gav"
     elif "екстрен" in context and "відключен" in context:
         kind = "emergency"
@@ -92,7 +100,7 @@ def regional_event(post):
         kind = "area"
     else:
         return None
-    if re.search(
+    if restore_gpv or re.search(
         r"скасован|завершено|завершені|закінчен|відмінено|"
         r"відновлено|відновили|заживлено|заживили|повернул\w*\s+світло",
         title,
@@ -352,8 +360,11 @@ def fetch_official_page():
 
 
 def normalized_house(value):
-    text = re.sub(r"[\s/\\.-]", "", str(value)).casefold()
-    return text.replace("a", "а").replace("b", "в")
+    """Preserve house-number separators: 1/1 is NOT house 11."""
+    text = re.sub(r"\s+", "", str(value)).casefold().replace("\\", "/")
+    text = text.replace("a", "а").replace("b", "в").replace("i", "і")
+    # DTEK commonly spells a letter suffix with or without a dash.
+    return re.sub(r"(?<=\d)-(?=[а-яіїєґ])", "", text)
 
 
 def address_fields(secret):
