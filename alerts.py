@@ -286,7 +286,7 @@ def address_message(event, changed=False, now=None):
     """
     titles = {
         "repair": "🛠 <b>Планові ремонтні роботи</b>",
-        "fault": "‼️ <b>ДТЕК повідомляє про аварійне відключення</b>",
+        "fault": "‼️ <b>Аварійне відключення за даними ДТЕК</b>",
         "unclassified": "⚠️ <b>Повідомлення ДТЕК про відключення</b>",
     }
     title = ("🔄 <b>Оновлено дані щодо відключення</b>" if changed
@@ -313,7 +313,7 @@ def address_message(event, changed=False, now=None):
     else:
         lines.append("Орієнтовний час відновлення не зазначено.")
     if event["category"] == "repair":
-        lines.append("Причина за ДТЕК: планові роботи.")
+        lines.append("Причина: планові роботи (за даними ДТЕК).")
     elif event["category"] == "fault":
         lines.append("Причина за ДТЕК: аварійне відключення.")
     if now:
