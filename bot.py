@@ -154,7 +154,25 @@ def describe_changes(previous, current):
     return lines
 
 
-def day_message(day, group, spans, updated=None, event="new", previous=None):
+def newly_current_schedule_outage(day, spans, previous, observed_at):
+    """A DTEK-confirmed slot covers NOW but prior published plan did not.
+
+    This is a statement about the SCHEDULE, never voltage at the house.
+    """
+    if observed_at is None:
+        return False
+    instant = observed_at.astimezone(KYIV)
+    if instant.date() != day:
+        return False
+    minute = instant.hour * 60 + instant.minute
+    now_off = any(a <= minute < b and status == "off"
+                  for a, b, status in spans)
+    before_off = any(a <= minute < b and status == "off"
+                     for a, b, status in (previous or ()))
+    return now_off and not before_off
+
+
+def day_message(day, group, spans, updated=None, event="new", previous=None, observed_at=None):
     """Ukrainian daily message, only when there are scheduled/possible outages."""
     if not spans:
         return None
@@ -167,6 +185,13 @@ def day_message(day, group, spans, updated=None, event="new", previous=None):
         titles[event],
         f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
     ]
+    if newly_current_schedule_outage(day, spans, previous, observed_at):
+        lines.extend([
+            "",
+            "⚠️ <b>За оновленим графіком час відключення вже настав.</b>",
+            "ДТЕК міг повідомити про зміну пізніше фактичного початку.",
+            "Графік не підтверджує стан електропостачання конкретної квартири.",
+        ])
     if event == "changed":
         details = describe_changes(previous, spans)
         if details:
@@ -585,10 +610,15 @@ async def once():
                     old_spans = None
                     if isinstance(old, dict) and isinstance(old.get("spans"), list):
                         old_spans = [tuple(item) for item in old["spans"]]
-                    message = day_message(day, group, spans, updated,
-                                          event=event, previous=old_spans)
+                    late_now = newly_current_schedule_outage(
+                        day, spans, old_spans, now
+                    )
+                    message = day_message(
+                        day, group, spans, updated, event=event,
+                        previous=old_spans, observed_at=now,
+                    )
                     next_state["spans"] = [list(span) for span in spans]
-                    priority = 2 if event == "changed" else 4
+                    priority = 1 if late_now else 2 if event == "changed" else 4
                 elif kind == "day_cancel":
                     day, updated = parts
                     message = cancellation_message(day, group, updated)
