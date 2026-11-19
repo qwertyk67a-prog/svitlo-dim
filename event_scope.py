@@ -112,9 +112,16 @@ def coverage_for_house(announcement, scope):
     if _exact_house(text, scope):
         return {"level": "house", "partial": False, "label": "будинок"}
 
+    # If a report specifies ANOTHER address, the wider city header does not
+    # make that address relevant. A street-only notice is also insufficient.
+    if re.search(r"\b(?:вул\.?|вулиця|просп\.?|проспект|будинок|буд\.)\s+", text):
+        return None
+
     # Explicit narrower locality beats the broader regional headline.
     districts = DISTRICT_NAME.findall(text)
     if districts:
+        if not any(city in text for city in CITY_NAMES):
+            return None  # Same-named districts can exist in different cities.
         if any(_district_matches(word, scope.get("district", ""))
                for word in districts):
             return {
@@ -125,6 +132,8 @@ def coverage_for_house(announcement, scope):
 
     quarters = QUARTER_NAME.findall(text)
     if quarters:
+        if not any(city in text for city in CITY_NAMES):
+            return None
         if any(_quarter_matches(number, scope.get("quarter", ""))
                for number in quarters):
             return {
