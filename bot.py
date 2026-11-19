@@ -196,7 +196,8 @@ def newly_current_schedule_outage(day, spans, previous, observed_at):
     return now_off and not before_off
 
 
-def day_message(day, group, spans, updated=None, event="new", previous=None, observed_at=None):
+def day_message(day, group, spans, updated=None, event="new", previous=None,
+                observed_at=None, total_spans=None):
     """Ukrainian daily message, only when there are scheduled/possible outages."""
     if not spans:
         return None
@@ -226,12 +227,14 @@ def day_message(day, group, spans, updated=None, event="new", previous=None, obs
         if selected:
             lines.extend(["", f"<b>{title}</b>"])
             lines.extend(f"• {clock(a)}–{clock(b)}" for a, b in selected)
-    confirmed_minutes = duration(spans, "off")
-    possible_minutes = duration(spans, "maybe")
+    # Current/future intervals are displayed; totals cover the whole day.
+    totals = spans if total_spans is None else total_spans
+    confirmed_minutes = duration(totals, "off")
+    possible_minutes = duration(totals, "maybe")
     if confirmed_minutes:
-        lines.append(f"\n⏱ Загалом без світла за графіком: <b>{minutes_text(confirmed_minutes)}</b>")
+        lines.append(f"\n⏱ Загалом за добу за графіком: <b>{minutes_text(confirmed_minutes)}</b>")
     if possible_minutes:
-        lines.append(f"⏱ Можливі відключення: <b>{minutes_text(possible_minutes)}</b>")
+        lines.append(f"⏱ Можливі відключення за добу: <b>{minutes_text(possible_minutes)}</b>")
     if updated:
         lines.append("\nОновлено: " + html.escape(str(updated)))
     lines.append(f'<a href="{SOURCE}">Джерело: ДТЕК</a>')
@@ -336,17 +339,11 @@ def collect_notifications(source, group, today, state=None):
         return []
 
     actual = {}
-    active_region = False
     if source.fact:
         for stamp, group_map in source.fact.days.items():
             day = datetime.fromtimestamp(int(stamp), KYIV).date()
-            if day not in (today, today + timedelta(days=1)):
-                continue
-            actual[day] = group_map
-            for slots in group_map.values():
-                spans = parse_verified(slots, labels)
-                if spans:
-                    active_region = True
+            if day in (today, today + timedelta(days=1)):
+                actual[day] = group_map
 
     result = []
     for day in (today, today + timedelta(days=1)):
@@ -382,7 +379,7 @@ def collect_notifications(source, group, today, state=None):
                     tuple((a, b) for a, b, _mode in spans),
                 ))
 
-    if all_seven_verified and entries and active_region:
+    if all_seven_verified and entries:
         # Maintain prior weekly hash for previously sent weekly forecasts.
         payload = (monday.isoformat(), group,
                    tuple((day.isoformat(), spans) for day, spans in entries))
@@ -677,6 +674,7 @@ async def once():
                         message = day_message(
                             day, group, new_visible, updated, event=event,
                             previous=old_visible, observed_at=now,
+                            total_spans=spans,
                         )
                         priority = 1 if late_now else 2 if event == "changed" else 4
                 elif kind == "day_cancel":
