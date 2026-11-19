@@ -32,4 +32,21 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pytest PyYAML
       - run: python -m pip check
+      - name: Report whether repository activation variable is visible
+        env:
+          CONFIGURED_BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+        run: |
+          python - <<'PY'
+          import os
+          value = os.environ.get("CONFIGURED_BOT_ENABLED", "")
+          stripped = value.strip()
+          print("ACTIVATION_DIAGNOSTIC: nonempty =", bool(value))
+          print("ACTIVATION_DIAGNOSTIC: exact_true =", value == "true")
+          print("ACTIVATION_DIAGNOSTIC: trimmed_true =", stripped == "true")
+          print("ACTIVATION_DIAGNOSTIC: casefold_true =", stripped.casefold() == "true")
+          print("ACTIVATION_DIAGNOSTIC: quoted_true =", stripped.strip(chr(34) + chr(39)) == "true")
+          print("ACTIVATION_DIAGNOSTIC: length =", len(value))
+          print("ACTIVATION_DIAGNOSTIC: leading_or_trailing_whitespace =", value != stripped)
+          print("ACTIVATION_DIAGNOSTIC: contains_nonascii =", not value.isascii())
+          PY
       - run: python -m pytest -q tests/

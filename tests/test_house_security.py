@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import subprocess
+import os
 
 import yaml
 
@@ -114,3 +115,51 @@ def test_telegram_diagnostic_no_mutations_and_no_plaintext_values():
     assert "deleteWebhook" not in script
     assert "setWebhook" not in script
     assert "offset=" not in script
+
+
+def test_activation_gate_is_runner_level_and_manual_fail_closed():
+    wf=yaml.safe_load((ROOT/".github/workflows/check.yml").read_text())
+    job=wf["jobs"]["check"]
+    assert "if" not in job  # Avoid job-level skipped status.
+    steps=job["steps"]
+    gate=steps[0]
+    assert gate["id"]=="gate"
+    assert "vars.BOT_ENABLED" in gate["env"]["CONFIGURED_BOT_ENABLED"]
+    assert '[[:space:]]*true[[:space:]]*' in gate["run"]
+    assert '"$GITHUB_EVENT_NAME" == "workflow_dispatch"' in gate["run"]
+    assert 'exit 1' in gate["run"]
+    for step in steps[1:]:
+        assert "steps.gate.outputs.active == 'true'" in step.get("if","")
+    assert "secrets.TELEGRAM_BOT_TOKEN" in (
+        ROOT/".github/workflows/check.yml").read_text()
+
+
+def test_runner_gate_accepts_surrounding_spaces_but_rejects_other_values(tmp_path):
+    wf=yaml.safe_load((ROOT/".github/workflows/check.yml").read_text())
+    script=wf["jobs"]["check"]["steps"][0]["run"]
+    for value, manual, expected_success, expected_active in (
+        ("true", True, True, "true"),
+        ("true ", True, True, "true"),
+        (" true", True, True, "true"),
+        (" \ttrue\n", True, True, "true"),
+        ("true false", True, False, None),
+        ("false", True, False, None),
+        ("", False, True, "false"),
+    ):
+        output=tmp_path/"activation.txt"
+        output.write_text("", encoding="utf-8")
+        env=os.environ.copy()
+        env.update({
+            "CONFIGURED_BOT_ENABLED": value,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_EVENT_NAME": "workflow_dispatch" if manual else "schedule",
+        })
+        result=subprocess.run(
+            ["bash","-e"],input=script,text=True,capture_output=True,env=env,
+            check=False,
+        )
+        assert (result.returncode==0)==expected_success, (
+            value,result.stdout,result.stderr
+        )
+        if expected_active is not None:
+            assert f"active={expected_active}" in output.read_text(encoding="utf-8")
