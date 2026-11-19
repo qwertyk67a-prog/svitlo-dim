@@ -178,7 +178,8 @@ def test_missing_address_data_never_sends_false_queue_change(tmp_path, monkeypat
     async def should_not_run(*args):
         raise AssertionError("No queue schedule should be sent without confirmation")
     monkeypatch.setattr(bot,"get_schedule",should_not_run)
-    asyncio.run(bot.once())
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
     assert calls == []
     assert "house:groups" not in json.loads(state_file.read_text())
 
