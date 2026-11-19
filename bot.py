@@ -522,13 +522,19 @@ async def once():
 
     path = Path(os.getenv("STATE_PATH", "data/state.json"))
     state = state_read(path)
+
+    def persist():
+        """Never mutate a real notification checkpoint during a dry run."""
+        if not dry_run:
+            state_write(path, state)
+
     now = datetime.now(KYIV)
     today = now.date()
     selected = os.getenv("DTEK_GROUP", "6.2").strip()
     group_id = "GPV" + selected
     leads = parse_reminder_minutes(os.getenv("REMINDER_MINUTES", "0"))
     trim_state(state, today)
-    state_write(path, state)
+    persist()
     problems = []
     sent = 0
 
@@ -542,6 +548,8 @@ async def once():
     allow_unverified = os.getenv("ALLOW_UNVERIFIED_GROUP", "false").lower() == "true"
     if not private_address and not allow_unverified:
         LOG.warning("Адресу ДТЕК не налаштовано; невизначену чергу не публікуємо")
+        if dry_run:
+            raise RuntimeError("DRY-RUN потребує налаштованого секрету адреси ДТЕК")
         return
     if private_address:
         try:
@@ -559,7 +567,7 @@ async def once():
             # confirmed queues govern automatic tracking after migration.
             if "house:queue_hold" in state:
                 state.pop("house:queue_hold", None)
-                state_write(path, state)
+                persist()
         except Exception as exc:
             LOG.warning("Не вдалося перевірити черги за адресою: %s",
                         type(exc).__name__)
@@ -593,7 +601,7 @@ async def once():
             enqueue(1, "house:groups", house_snapshot, queue_change, "queue_change")
         elif state.get("house:groups") != house_snapshot:
             state["house:groups"] = house_snapshot
-            state_write(path, state)
+            persist()
 
     # Official emergency and GAV announcements are prioritized.
     if os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
@@ -605,7 +613,7 @@ async def once():
             for post_id, key, value, message in events:
                 enqueue(0, key, value, message, "official", cursor=post_id)
             if not events and "official:last_id" in state:
-                state_write(path, state)
+                persist()
         except Exception as exc:
             LOG.warning("Офіційні оголошення недоступні: %s", type(exc).__name__)
 
@@ -658,7 +666,7 @@ async def once():
                     if day == today and not new_visible and not old_visible:
                         next_state["status"] = "historical_only"
                         state[key] = next_state
-                        state_write(path, state)
+                        persist()
                         continue
 
                     # A previous relevant outage was removed and the new
@@ -677,7 +685,7 @@ async def once():
                                 upcoming_signature(day, spans, now) and
                                 previous_status == "outages"):
                             state[key] = next_state
-                            state_write(path, state)
+                            persist()
                             continue
 
                         event = ("resumed" if previous_status == "cancelled" else
@@ -702,7 +710,7 @@ async def once():
                             day, old_spans, now):
                         next_state["status"] = "cancelled"
                         state[key] = next_state
-                        state_write(path, state)
+                        persist()
                         continue
                     message = cancellation_message(
                         day, group, updated, remaining_today=day == today
@@ -737,11 +745,11 @@ async def once():
             continue
         if key == "official:last_id" and origin == "official":
             state[key] = value
-            state_write(path, state)
+            persist()
             continue
         if not message:
             state[key] = value
-            state_write(path, state)
+            persist()
             continue
         if deadline is not None and datetime.now(KYIV) >= deadline:
             LOG.info("Пропущено прострочене нагадування: %s", key)
@@ -773,11 +781,13 @@ async def once():
             # shared between all incidents of the same regional type.
             state[f"official:event:{cursor}"] = value
         state[key] = value
-        state_write(path, state)
+        persist()
         sent += 1
         LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", key)
 
-    LOG.info("Нових сповіщень: %d; помилок доставки: %d", sent, len(problems))
+    LOG.info("%s: %d; помилок доставки: %d",
+             "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
+             sent, len(problems))
     if problems:
         raise RuntimeError(f"Помилки Telegram: {len(problems)}; успішні події збережено")
 

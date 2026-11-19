@@ -406,4 +406,19 @@ def test_dry_run_never_sends_telegram(tmp_path, monkeypatch):
                         lambda *_args, **_kwargs: (_ for _ in ()).throw(
                             AssertionError("DRY_RUN must never send")))
     asyncio.run(bot.once())
-    assert json.loads(state_file.read_text())
+    assert not state_file.exists()
+
+
+def test_dry_run_does_not_change_existing_state(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.setenv("DRY_RUN", "true")
+    state_file.write_text('{"unchanged": true}', encoding="utf-8")
+    async def schedules():
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_a, **_k: (_ for _ in ()).throw(
+                            AssertionError("No Telegram calls in dry-run")))
+    asyncio.run(bot.once())
+    assert json.loads(state_file.read_text()) == {"unchanged": True}

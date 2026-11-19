@@ -1,3 +1,4 @@
+-c constraints.txt
 dtek-blackout-client==0.1.12
-requests>=2.32,<3
-beautifulsoup4>=4.12,<5
+requests==2.34.2
+beautifulsoup4==4.15.0

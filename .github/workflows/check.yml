@@ -23,12 +23,14 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Verify installed dependency compatibility
+        run: python -m pip check
       - name: Cache Chromium for DTEK WAF fallback
         id: chromium-cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt', 'constraints.txt') }}
       - name: Install Chromium on cache miss
         if: steps.chromium-cache.outputs.cache-hit != 'true'
         run: python -m playwright install --with-deps chromium
@@ -65,7 +67,24 @@ jobs:
           esac
           ASKPASS
               chmod 700 "$RUNNER_TEMP/svitlo-askpass"
-              GIT_ASKPASS="$RUNNER_TEMP/svitlo-askpass" GIT_TERMINAL_PROMPT=0 \
-                git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:main
+              # Retry non-fast-forward races with ordinary code commits.
+              # A conflicting state edit is a hard error, never overwritten.
+              for attempt in 1 2 3; do
+                if GIT_ASKPASS="$RUNNER_TEMP/svitlo-askpass" GIT_TERMINAL_PROMPT=0 \
+                  git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:main; then
+                  exit 0
+                fi
+                if [[ "$attempt" == 3 ]]; then
+                  echo "State push failed after 3 attempts" >&2
+                  exit 1
+                fi
+                GIT_ASKPASS="$RUNNER_TEMP/svitlo-askpass" GIT_TERMINAL_PROMPT=0 \
+                  git fetch "https://github.com/$GITHUB_REPOSITORY.git" main
+                git rebase FETCH_HEAD || {
+                  git rebase --abort || true
+                  echo "State merge conflict; refusing to discard notifications" >&2
+                  exit 1
+                }
+              done
             fi
           fi

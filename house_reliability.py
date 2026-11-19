@@ -139,6 +139,19 @@ def trim_state(state: dict, today) -> int:
     """Keep existing deduplication state bounded without deleting live keys."""
     before = len(state)
     for key in list(state):
+        if key.startswith("official:event:"):
+            record = state.get(key)
+            if not isinstance(record, dict):
+                state.pop(key, None)
+                continue
+            try:
+                published = datetime.fromisoformat(record["published"]).date()
+            except (KeyError, TypeError, ValueError):
+                state.pop(key, None)
+                continue
+            if published < today - timedelta(days=21):
+                state.pop(key, None)
+            continue
         date_text = None
         if key.startswith(("reminder:", "week:")):
             parts = key.split(":")
