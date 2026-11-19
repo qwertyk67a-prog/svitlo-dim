@@ -19,7 +19,7 @@ jobs:
         env:
           CONFIGURED_BOT_ENABLED: ${{ vars.BOT_ENABLED }}
         run: |
-          if [[ "$CONFIGURED_BOT_ENABLED" == "true" ]]; then
+          if [[ "$CONFIGURED_BOT_ENABLED" =~ ^[[:space:]]*true[[:space:]]*$ ]]; then
             echo "active=true" >> "$GITHUB_OUTPUT"
             echo "BOT_ENABLED is exactly true; continuing with DTEK"
           else
