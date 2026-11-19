@@ -444,6 +444,18 @@ def get_house_entry(response, house):
     matches = [(key, e) for key, e in response.houses.items()
                if normalized_house(key) == normalized_house(house)]
     if len(matches) != 1:
+        # Never expose configured address or candidate numbers in logs.
+        # Loose matching alone would conflate 11 and 1/1.
+        def rough(value):
+            return re.sub(r"[\\/\s.\-]", "", normalized_house(value))
+        similar_count = sum(
+            rough(key) == rough(house) for key in response.houses
+        )
+        LOG.warning(
+            "Адресний довідник ДТЕК: записів=%d, точних збігів=%d, "
+            "лише приблизних збігів=%d",
+            len(response.houses), len(matches), similar_count,
+        )
         raise RuntimeError("Будинок не знайдено однозначно в ДТЕК")
     entry = matches[0][1]
     # An empty record can mean none; but only in a successfully parsed response.

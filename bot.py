@@ -580,6 +580,8 @@ async def once():
                     LOG.warning("Використовую останні підтверджені черги будинку")
                 except ValueError:
                     house_groups = None
+            if house_groups is None:
+                source_problems.append("address_lookup")
     elif state.get("house:queue_hold"):
         LOG.warning("Раніше чергу не підтверджено; потрібен секрет адреси")
         return

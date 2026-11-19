@@ -678,3 +678,20 @@ def test_untrusted_hash_state_does_not_crash_monitor():
     page = html_page([fake_post(
         401, "Дніпропетровщина: екстрені відключення запроваджено")])
     assert [row for row in scoped_candidates(page, state, NOW) if row[3]]
+
+
+def test_private_house_lookup_failure_logs_only_counts(caplog):
+    import logging
+    from alerts import get_house_entry
+    response = SimpleNamespace(houses={"1/1": house(), "12": house()})
+    with caplog.at_level(logging.WARNING):
+        try:
+            get_house_entry(response, "11")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("Must refuse approximate building")
+    assert "записів=2" in caplog.text
+    assert "приблизних збігів=1" in caplog.text
+    assert "11" not in caplog.text
+    assert "1/1" not in caplog.text
