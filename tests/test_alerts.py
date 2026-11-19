@@ -67,7 +67,13 @@ def test_kyiv_dnipro_city_and_general_news_not_transmitted_to_kryvyi_rih():
         "Дніпропетровщина: графіки відключень на 8 листопада",
         "Дніпропетровщина: відновлення електропостачання у місті Дніпро",
     ]
-    assert all(regional_event(fake_post(21, t)) is None for t in samples)
+    # Classification alone is not delivery: scope verification must
+    # exclude the different city, even for a restoration announcement.
+    for title in samples:
+        page = html_page([fake_post(21, title)])
+        assert not [r for r in scoped_candidates(
+            page, {"official:last_id": 20}, NOW
+        ) if r[3]], title
 
 
 def test_emergency_started_and_cancelled():
@@ -407,3 +413,33 @@ def test_different_city_inside_the_same_oblast_is_silent():
     page=html_page([fake_post(14,
         "Дніпропетровщина: екстрені відключення лише у місті Нікополь")])
     assert not [r for r in scoped_candidates(page,{"official:last_id":10},NOW) if r[3]]
+
+
+
+def test_partial_area_restoration_notified_only_after_prior_area_alert():
+    scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    first=html_page([fake_post(11,
+        "Кривий Ріг: частково знеструмлено Покровський район")])
+    state={"official:last_id":10}
+    opened=region_candidates(first,state,NOW,scope=scope)
+    first_messages=[r[3] for r in opened if r[3]]
+    assert len(first_messages)==1
+    for _id,key,value,_message in opened:
+        state[key]=value
+    restored=html_page([fake_post(12,
+        "Кривий Ріг: відновлено електропостачання у Покровському районі")])
+    ended=region_candidates(restored,state,NOW,scope=scope)
+    sent=[r[3] for r in ended if r[3]]
+    assert len(sent)==1
+    assert "відновлення електропостачання на території" in sent[0]
+    assert "не підтверджує наявність електроенергії у кожному будинку" in sent[0]
+    for _id,key,value,_message in ended:state[key]=value
+    assert not [r for r in region_candidates(restored,state,NOW,scope=scope) if r[3]]
+
+
+def test_partial_area_restoration_without_prior_event_is_silent():
+    scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    page=html_page([fake_post(15,
+        "Кривий Ріг: відновлено електропостачання у Покровському районі")])
+    rows=region_candidates(page,{"official:last_id":14},NOW,scope=scope)
+    assert not [r for r in rows if r[3]]
