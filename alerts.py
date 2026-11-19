@@ -49,9 +49,10 @@ def official_posts(page):
 
 
 def regional_event(post):
-    """Strictly classify explicit region-wide or Kryvyi Rih headline events.
+    """Only direct operational announcements from the official DTEK channel.
 
-    Dnipro CITY reports and news about general attacks are not local events.
+    A regional headline is insufficient if the text identifies another town.
+    Territorial relevance is checked independently by coverage_for_house().
     """
     lines = post["text"].strip().splitlines()
     if not lines:
@@ -63,18 +64,30 @@ def regional_event(post):
         r"[а-яіїєґ][а-яіїєґ\- ]+ район|[0-9 ]+ квартал)\s*:",
         title,
     )
-    if not target:
+    # Official DTEK also publishes direct headlines starting with the
+    # Ukrenergo order rather than an area prefix.
+    order = re.match(
+        r"^за\s+(?:командою|наказом|розпорядженням)\s+"
+        r"(?:нек\s+)?укренерго\b", title,
+    )
+    if not target and not order:
         return None
-    area = target.group(1)
-    if re.search(r"\b(гав|графік(?:и|ів)?\s+аварійн\w*\s+відключен\w*)\b", title):
+    context = " ".join(lines[:3]).casefold()[:650]
+    if order and not re.search(
+        r"дніпропетровськ|дніпропетровщ|крив\w*\s+р\w*|"
+        r"по\s+всій\s+україн\w*|в\s+усіх\s+областях",
+        context,
+    ):
+        return None
+    if re.search(r"\b(?:гав|графік\w*\s+аварійн\w*\s+відключен\w*)\b", context):
         kind = "gav"
-    elif "екстрен" in title and "відключен" in title:
+    elif "екстрен" in context and "відключен" in context:
         kind = "emergency"
     elif re.search(
         r"\b(?:знеструмл\w*|без\s+світла|"
         r"(?:відсутн\w*|припинен\w*|відновлен\w*|відновл\w*)\s+"
         r"електропостачан\w*|заживлен\w*)\b",
-        title,
+        context,
     ):
         kind = "area"
     else:
@@ -88,25 +101,28 @@ def regional_event(post):
     elif re.search(
         r"запроваджен|застосован|введен|діють|тривають|продовжен|"
         r"знеструмл|без\s+світла|відсутн\w*\s+електропостачан",
-        title + " " + post["text"].casefold(),
+        context,
     ):
         status = "active"
     else:
-        # Ambiguous headlines must never generate residents' alerts.
         return None
-    area_label = (
-        "Кривий Ріг" if area == "кривий ріг"
-        else "Дніпропетровська область" if area in (
-            "дніпропетровщина", "дніпропетровська область"
-        )
-        else "Україна" if area in ("україна", "укренерго")
-        else area.capitalize()
-    )
-    return {"kind": kind, "status": status,
-            "area": area_label, "post": post}
+    area = target.group(1) if target else ""
+    if area == "кривий ріг" or (order and "крив" in context):
+        area_label = "Кривий Ріг"
+    elif area in ("дніпропетровщина", "дніпропетровська область") or (
+        order and re.search(r"дніпропетровськ|дніпропетровщ", context)
+    ):
+        area_label = "Дніпропетровська область"
+    elif area in ("україна", "укренерго") or order:
+        area_label = "Україна"
+    else:
+        area_label = area.capitalize() if area else "ДТЕК"
+    return {
+        "kind": kind, "status": status, "area": area_label,
+        "post": post, "operator": "ДТЕК", "source": post["url"],
+    }
 
-
-def regional_message(event):
+def regional_message(event, changed=False):
     kind = event["kind"]
     active = event["status"] == "active"
     area = event["area"]
@@ -126,6 +142,9 @@ def regional_message(event):
         body = ("Відключення можуть відбуватися поза погодинним графіком." if active else
                 "Це повідомлення про територію, а не підтвердження відновлення у будинку.")
 
+    if changed and active:
+        title = "🔄 <b>ДТЕК уточнив строки відключення</b>"
+        body = "Офіційні дані про час події оновлено."
     coverage = event.get("coverage") or {}
     label = html.escape(coverage.get("label") or area)
     place_note = (
@@ -155,11 +174,18 @@ def regional_message(event):
             "Фактичну наявність електроенергії у будинку не підтверджено."
         )
     reported = event["post"]["date"].astimezone(KYIV).strftime("%d.%m.%Y %H:%M")
+    started = published_event_start(event["post"])
+    ending = published_event_end(event["post"])
+    times = []
+    if started:
+        times.append("Зазначений початок: " + started.strftime("%d.%m.%Y %H:%M"))
+    if ending:
+        times.append("Орієнтовне завершення: " + ending.strftime("%d.%m.%Y %H:%M"))
     return "\n".join((
         title, f"📍 {html.escape(area)}", "",
         place_note, uncertainty,
         f"Офіційне повідомлення опубліковано: {reported}.",
-        body,
+        *times, body,
         "Це повідомлення не підтверджує відключення кожної квартири.",
         f'<a href="{html.escape(event["post"]["url"], quote=True)}">Офіційне повідомлення ДТЕК</a>',
     ))
@@ -181,6 +207,47 @@ def published_event_end(post):
     return parse_dtek_date(raw.group(1)) if raw else None
 
 
+def published_event_start(post):
+    """Return a start only when DTEK supplied a complete date and time."""
+    text = post["text"].casefold()
+    match = re.search(
+        r"(?:початок|розпочат\w*|з\s+)\s*[:—–\-]?\s*"
+        r"(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}|"
+        r"\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})",
+        text,
+    )
+    return parse_dtek_date(match.group(1)) if match else None
+
+
+def event_record(event, now):
+    """Public deduplication state contains no private address or chat ID."""
+    post = event["post"]
+    start = published_event_start(post)
+    finish = published_event_end(post)
+    level = event["coverage"]["level"]
+    # A date is an identity fallback, NOT a claimed outage start time.
+    identity = (event["kind"], event["area"], level,
+                start.isoformat() if start else post["date"].date().isoformat())
+    revision = (event["kind"], event["area"], level,
+                start.isoformat() if start else None,
+                finish.isoformat() if finish else None)
+    fingerprint = lambda value: hashlib.sha256(
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()[:20]
+    return {
+        "status": event["status"],
+        "event_id": fingerprint(identity),
+        "revision": fingerprint(revision),
+        "operator": "ДТЕК",
+        "source": post["url"],
+        "published": post["date"].isoformat(),
+        "detected": now.isoformat(),
+        "start": start.isoformat() if start else None,
+        "end": finish.isoformat() if finish else None,
+        "area": event["area"],
+    }
+
+
 def region_candidates(page, state, now, scope=None):
     posts = official_posts(page)
     if not posts:
@@ -188,79 +255,92 @@ def region_candidates(page, state, now, scope=None):
     from event_scope import coverage_for_house
     old_id = state.get("official:last_id")
     max_id = max(p["id"] for p in posts)
-    if old_id is None:
-        # On first deployment, notify of a RECENT still-active regional
-        # emergency. A newer cancellation overrides an earlier activation.
-        # Older history is ignored to avoid backfilling outdated alerts.
-        latest_by_kind = {}
-        for post in posts:
-            age = now - post["date"]
-            if not timedelta(0) <= age <= timedelta(hours=2):
-                continue
-            event = regional_event(post)
-            coverage = coverage_for_house(post["text"], scope) if event else None
-            if event and coverage:
-                if (event["status"] == "active" and
-                        (end := published_event_end(post)) and end <= now):
-                    # The incident was already over before this first poll.
-                    event = {**event, "status": "ended"}
-                event["coverage"] = coverage
-                latest_by_kind[(event["kind"], coverage["level"])] = event
-        pending_initial = []
-        for (kind, level), event in latest_by_kind.items():
-            if event["status"] != "active":
-                continue
-            pending_initial.append((
-                event["post"]["id"], f"official:status:{kind}:{level}", "active",
-                regional_message(event),
-            ))
-        if pending_initial:
-            # Checkpoint only after successfully notifying residents.
-            pending_initial.append((max_id, "official:last_id", max_id, None))
-            return pending_initial
-        state["official:last_id"] = max_id
-        LOG.info("Початкова синхронізація офіційного каналу: %d", max_id)
-        return []
+    first_run = old_id is None
+    if first_run:
+        old_id = min(p["id"] for p in posts) - 1
     try:
         old_id = int(old_id)
     except (ValueError, TypeError):
         raise RuntimeError("Некоректний стан останнього офіційного повідомлення")
-    pending = []
-    # Inspect the latest relevant official status BEFORE sending anything.
-    # If both start and end arrived while the bot was polling, the incident
-    # had already ended and must not generate an obsolete alert.
+
     latest = {}
     for post in posts:
-        if post["id"] <= old_id:
+        if post["id"] <= old_id or post["date"] > now + timedelta(minutes=10):
             continue
         event = regional_event(post)
         coverage = coverage_for_house(post["text"], scope) if event else None
         if not event or not coverage:
             continue
-        if post["date"] > now + timedelta(minutes=10):
-            continue
-        if now - post["date"] > timedelta(hours=6):
-            continue
-        if (event["status"] == "active" and
-                (finish := published_event_end(post)) and finish <= now):
-            event = {**event, "status": "ended"}
         event["coverage"] = coverage
         key = f"official:status:{event['kind']}:{coverage['level']}"
+        previous = state.get(key)
+        previous_status = (
+            previous.get("status") if isinstance(previous, dict) else previous
+        )
+        age = now - post["date"]
+        finish = published_event_end(post)
+        # A delayed post is still useful if DTEK explicitly says the
+        # reported outage extends into the future. Never invent an end.
+        if event["status"] == "active":
+            if finish and finish <= now:
+                event["status"] = "expired"
+            elif age > timedelta(hours=6) and not (
+                finish and finish > now and age <= timedelta(days=2)
+            ):
+                continue
+            if first_run and age > timedelta(hours=2) and not (
+                finish and finish > now and age <= timedelta(days=2)
+            ):
+                continue
+        elif age > timedelta(days=2):
+            continue
+        # An old cancellation should not be sent unless a previous
+        # notification was delivered for this event type and scope.
         latest[key] = (post["id"], event)
 
+    pending = []
     for key, (post_id, event) in sorted(
-            latest.items(), key=lambda item: item[1][0]):
-        old_status = state.get(key, "unknown")
-        if event["status"] == "active" and old_status != "active":
-            pending.append((post_id, key, "active", regional_message(event)))
-        elif event["status"] == "ended" and old_status == "active":
-            pending.append((post_id, key, "ended", regional_message(event)))
-    # A final checkpoint never triggers an outgoing message.
-    # The caller saves it only after prior sends succeed.
+        latest.items(), key=lambda item: item[1][0]
+    ):
+        old = state.get(key)
+        old_status = old.get("status") if isinstance(old, dict) else old
+        current = event_record(event, now)
+        status = current["status"]
+        if status == "expired":
+            if old_status == "active":
+                pending.append((post_id, key, current, None))
+            continue
+        if status == "ended":
+            if old_status == "active":
+                pending.append((post_id, key, current, regional_message(event)))
+            continue
+        if first_run or old_status != "active":
+            pending.append((post_id, key, current, regional_message(event)))
+            continue
+        # Ongoing notices with a new post ID but unchanged facts are repeats.
+        # A verified changed start/end time is a meaningful update.
+        old_revision = old.get("revision") if isinstance(old, dict) else None
+        timing_changed = bool(current["start"] or current["end"]) and (
+            old_revision is not None and current["revision"] != old_revision
+        )
+        new_activation = (
+            isinstance(old, dict)
+            and current["event_id"] != old.get("event_id")
+            and re.search(r"запроваджен|введен|розпочат", event["post"]["text"].splitlines()[0].casefold())
+            and current["published"][:10] != str(old.get("published", ""))[:10]
+        )
+        if timing_changed or new_activation:
+            pending.append((
+                post_id, key, current, regional_message(event, changed=True)
+            ))
+    if first_run and not pending:
+        state["official:last_id"] = max_id
+        LOG.info("Початкова синхронізація офіційного каналу: %d", max_id)
+        return []
+    # The checkpoint is persisted after all successful Telegram sends.
     pending.append((max(old_id, max_id), "official:last_id",
                     max(old_id, max_id), None))
     return pending
-
 
 def fetch_official_page():
     response = requests.get(
@@ -436,16 +516,34 @@ def address_decision(entry, state, now, expected="GPV6.2"):
     key = "address:last_outage"
     old = state.get(key)
     event = address_event(entry)
+    old_active = isinstance(old, dict) and old.get("status") == "active"
+    old_end = parse_dtek_date(old.get("end")) if old_active else None
+    # A date without a clock time is NOT evidence of an ended event.
+    exact_end = bool(event and re.fullmatch(
+        r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|"
+        r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["end"]
+    ))
+    finish = parse_dtek_date(event["end"]) if exact_end else None
+    if event and finish and finish <= now:
+        if old_active and old_end and old_end > now:
+            # DTEK explicitly revised the estimate to a time already past.
+            # This is an early schedule correction, not voltage telemetry.
+            message = "\n".join((
+                "🔄 <b>ДТЕК уточнив орієнтовний час завершення</b>",
+                "Нове орієнтовне завершення: " + html.escape(event["end"]),
+                "Зазначений час уже минув.",
+                "Фактичне відновлення електроенергії в будинку не підтверджено.",
+                f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>',
+            ))
+            result.append(("address", key, {
+                "status": "expired", "end": event["end"],
+            }, message))
+        elif old_active:
+            result.append(("address", key, {
+                "status": "expired", "end": event["end"],
+            }, None))
+        event = None
     if event:
-        # A late-published outage that already reached its explicitly
-        # announced end is not a useful NEW notification.
-        # Do not infer physical voltage from this estimated timestamp.
-        finish = parse_dtek_date(event["end"])
-        if finish and finish <= now:
-            event = None
-    if event:
-        # Text edits to a reason are not new events. Only category or time
-        # changes should trigger another notification for the entire building.
         fingerprint = {k: event[k] for k in ("category", "start", "end")}
         digest = hashlib.sha256(json.dumps(
             fingerprint, sort_keys=True, ensure_ascii=False
@@ -455,11 +553,13 @@ def address_decision(entry, state, now, expected="GPV6.2"):
                 "digest": digest,
                 "end": event["end"],
                 "status": "active",
-            }, address_message(event, changed=isinstance(old, dict) and
-                               old.get("status") == "active", now=now)))
-    elif isinstance(old, dict) and old.get("status") == "active":
-        msg = address_clear_message({"end": old.get("end") or (old.get("event") or {}).get("end", "")}, now)
-        result.append(("address", key, {"status": "inactive"}, msg))
+            }, address_message(event, changed=old_active, now=now)))
+    elif not exact_end and old_active and old_end and old_end <= now:
+        # Disappearance from the address API is NOT proof of cancellation.
+        # Expire an elapsed estimate silently, without claiming restoration.
+        result.append(("address", key, {
+            "status": "expired", "end": old.get("end"),
+        }, None))
     # Group changes need human attention. Do not broadcast initial group assignment.
     previous = state.get("address:groups")
     current = sorted(set(entry.group_ids))
