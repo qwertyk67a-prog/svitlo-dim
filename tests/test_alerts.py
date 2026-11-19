@@ -695,3 +695,33 @@ def test_private_house_lookup_failure_logs_only_counts(caplog):
     assert "приблизних збігів=1" in caplog.text
     assert "11" not in caplog.text
     assert "1/1" not in caplog.text
+
+
+def test_letter_suffix_separator_is_a_unique_alias_only():
+    from alerts import get_house_entry
+    record = house(groups=("GPV6.2",))
+    response = SimpleNamespace(houses={"67/А": record})
+    assert get_house_entry(response, "67А") is record
+    assert get_house_entry(response, "67-А") is record
+
+
+def test_numeric_slash_does_not_become_house_eleven():
+    from alerts import get_house_entry
+    response = SimpleNamespace(houses={"1/1": house()})
+    try:
+        get_house_entry(response,"11")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("House 1/1 cannot be silently treated as 11")
+
+
+def test_ambiguous_letter_suffix_alias_is_rejected():
+    from alerts import get_house_entry
+    response = SimpleNamespace(houses={"67/А": house(), "67.А": house()})
+    try:
+        get_house_entry(response,"67А")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Two approximate variants cannot be resolved")

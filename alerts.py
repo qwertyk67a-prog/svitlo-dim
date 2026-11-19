@@ -443,6 +443,26 @@ def address_fields(secret):
 def get_house_entry(response, house):
     matches = [(key, e) for key, e in response.houses.items()
                if normalized_house(key) == normalized_house(house)]
+    if not matches:
+        # A slash or a dot directly BEFORE a letter suffix is a DTEK
+        # spelling variant. Numeric slash components (1/1) are NEVER
+        # ignored: they can denote a different legal building.
+        def letter_suffix_alias(value):
+            return re.sub(
+                r"(?<=\d)[/.](?=[а-яіїєґ]$)", "", normalized_house(value)
+            )
+        alias = letter_suffix_alias(house)
+        alternatives = [
+            (key, entry) for key, entry in response.houses.items()
+            if letter_suffix_alias(key) == alias
+        ]
+        if len(alternatives) == 1:
+            LOG.warning(
+                "Адресний довідник ДТЕК: знайдено один варіант написання "
+                "номера з роздільником перед літерою; перевірте адресу "
+                "на офіційному сайті."
+            )
+            matches = alternatives
     if len(matches) != 1:
         # Never expose configured address or candidate numbers in logs.
         # Loose matching alone would conflate 11 and 1/1.
