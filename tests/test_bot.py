@@ -300,3 +300,56 @@ def test_day_message_full_day_total_includes_past_outages():
     assert "Загалом за добу" in text
     assert "2 год" in text
     assert "01:00–02:00" not in text
+
+
+
+def test_weekly_excludes_past_and_confirmed_daily_date_without_changing_source():
+    from bot import weekly_message
+    monday = date(2026, 11, 16)
+    entries = [
+        (date(2026, 11, 19), ((330, 750),)),
+        (date(2026, 11, 20), ((150, 570), (780, 1200))),
+        (date(2026, 11, 21), ((0, 390), (600, 1020))),
+    ]
+    before = list(entries)
+    text = weekly_message(
+        monday, GROUP, entries,
+        observed_at=datetime(2026, 11, 20, 1, 9, tzinfo=KYIV),
+        confirmed_days={date(2026, 11, 20)},
+    )
+    assert text is not None
+    assert "Чт 19.11" not in text
+    assert "Пт 20.11" not in text
+    assert "Сб 21.11" in text
+    assert "00:00–06:30" in text
+    assert "добовим графіком" in text
+    assert entries == before
+
+
+def test_weekly_no_message_when_all_dates_are_past_or_daily_confirmed():
+    from bot import weekly_message
+    monday = date(2026, 11, 16)
+    assert weekly_message(
+        monday, GROUP,
+        [(date(2026, 11, 19), ((60, 180),)),
+         (date(2026, 11, 20), ((150, 570),))],
+        observed_at=datetime(2026, 11, 20, 1, 9, tzinfo=KYIV),
+        confirmed_days={date(2026, 11, 20)},
+    ) is None
+
+
+def test_daily_message_explicitly_supersedes_weekly_preview():
+    from bot import day_message
+    message = day_message(
+        date(2026, 11, 20), GROUP,
+        [(780, 1020, "off"), (1410, 1440, "off")],
+    )
+    assert "Добовий графік ДТЕК має пріоритет" in message
+
+
+def test_weekly_forecast_digest_is_not_clock_dependent():
+    src = fake_source(weekly={7: {"1": "maybe"}})
+    first = next(row for row in candidates(src) if row[2] == "week")
+    assert fingerprint(first[1]) == fingerprint(
+        next(row for row in candidates(src) if row[2] == "week")[1]
+    )
