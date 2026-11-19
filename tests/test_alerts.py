@@ -162,14 +162,15 @@ def test_new_status_once_and_repeated_status_silent():
     assert not [r for r in result if r[3]]
 
 
-def test_start_and_end_in_same_batch_remain_two_transitions():
+def test_start_and_end_in_same_batch_are_silent_if_never_announced():
     state={"official:last_id":10}
     page=html_page([
         fake_post(11,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області"),
         fake_post(12,"Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області"),
     ])
     output=scoped_candidates(page,state,NOW)
-    assert [r[2] for r in output if r[3]]==["active","ended"]
+    assert not [r for r in output if r[3]]
+    assert output[-1][1]=="official:last_id"
 
 
 def test_cancel_without_prior_announcement_is_silent():
@@ -443,3 +444,69 @@ def test_partial_area_restoration_without_prior_event_is_silent():
         "Кривий Ріг: відновлено електропостачання у Покровському районі")])
     rows=region_candidates(page,{"official:last_id":14},NOW,scope=scope)
     assert not [r for r in rows if r[3]]
+
+
+
+def test_address_first_discovered_after_end_is_silent_and_deduplicated():
+    event=house(reason="Аварійні роботи",kind="2",
+                start="08.11.2026 12:00",end="08.11.2026 15:00")
+    for tested_at in (NOW,NOW+timedelta(minutes=1)):
+        rows=address_decision(event,{},tested_at)
+        assert not [x for x in rows if x[1]=="address:last_outage" and x[3]]
+
+
+def test_address_end_exactly_now_is_silent():
+    event=house(reason="Аварійні роботи",kind="2",
+                start="08.11.2026 12:00",end="08.11.2026 16:00")
+    rows=address_decision(event,{},NOW)
+    assert not [x for x in rows if x[1]=="address:last_outage" and x[3]]
+
+
+def test_existing_ongoing_outage_ending_early_notifies_cancel():
+    old={"address:last_outage":{
+        "status":"active","digest":"old","end":"08.11.2026 18:00"
+    }}
+    event=house(reason="Аварійні роботи",kind="2",
+                start="08.11.2026 12:00",end="08.11.2026 15:00")
+    rows=address_decision(event,old,NOW)
+    msg=next(x[3] for x in rows if x[1]=="address:last_outage")
+    assert "більше не відображається" in msg
+    assert "не підтверджує фактичну наявність світла" in msg
+
+
+def test_official_emergency_ended_before_first_observation_is_silent():
+    page=html_page([
+        fake_post(20,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+                  NOW-timedelta(minutes=30)),
+        fake_post(21,"Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області",
+                  NOW-timedelta(minutes=8)),
+    ])
+    rows=scoped_candidates(page,{"official:last_id":19},NOW)
+    assert not [r for r in rows if r[3]]
+
+
+def test_official_emergency_end_still_notifies_if_started_was_previously_sent():
+    page=html_page([fake_post(21,
+         "Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області",
+         NOW-timedelta(minutes=8))])
+    state={"official:last_id":20,"official:status:emergency:region":"active"}
+    rows=scoped_candidates(page,state,NOW)
+    ends=[r for r in rows if r[3]]
+    assert len(ends)==1
+    assert ends[0][2]=="ended"
+
+
+def test_post_with_explicitly_elapsed_end_never_starts_outage_notice():
+    page=html_page([fake_post(20,
+        "Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області. "
+        "Орієнтовне завершення: 08.11.2026 15:00",NOW-timedelta(minutes=4))])
+    rows=scoped_candidates(page,{"official:last_id":19},NOW)
+    assert not [r for r in rows if r[3]]
+
+
+def test_post_with_future_explicit_end_is_not_suppressed():
+    page=html_page([fake_post(20,
+        "Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області. "
+        "Орієнтовне завершення: 08.11.2026 18:00",NOW-timedelta(minutes=4))])
+    rows=scoped_candidates(page,{"official:last_id":19},NOW)
+    assert len([r for r in rows if r[3]])==1
