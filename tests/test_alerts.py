@@ -277,10 +277,10 @@ def test_public_state_never_contains_address_response_reason():
     assert "Причина: планові роботи" in alerts[0][3]
 
 
-def test_group_mismatch_at_first_verified_read_gets_warning():
+def test_first_verified_queue_does_not_invent_prior_assignment():
     state={}
     result=address_decision(house(groups=["GPV5.1"]),state,NOW)
-    assert any(x[1]=="address:groups" and x[3] for x in result)
+    assert not [x for x in result if x[1]=="address:groups" and x[3]]
 
 
 def test_reason_wording_only_does_not_alert_again():

@@ -8,7 +8,6 @@ import asyncio
 import logging
 import os
 import sys
-import re
 
 from event_scope import house_scope_from_secret
 
@@ -21,19 +20,10 @@ async def main():
     if not os.getenv("DTEK_ADDRESS_JSON", "").strip():
         raise RuntimeError("Repository Secret DTEK_ADDRESS_JSON не задано")
     scope = house_scope_from_secret(os.environ["DTEK_ADDRESS_JSON"])
-    district = scope.get("district", "").strip().casefold()
-    quarter = scope.get("quarter", "").strip().casefold()
-    # These checks never print the stored secret or the real street/house.
-    district_ok = bool(re.fullmatch(
-        r"покровськ(?:ий|ого|ому)\s+район", district
-    ))
-    quarter_ok = bool(re.fullmatch(
-        r"129\s*[- ]?\s*квартал", quarter
-    ))
-    print("Перевірка збереженої адреси: район =", "OK" if district_ok else "НЕ ЗБІГАЄТЬСЯ")
-    print("Перевірка збереженої адреси: квартал =", "OK" if quarter_ok else "НЕ ЗБІГАЄТЬСЯ")
-    if not (district_ok and quarter_ok):
-        raise RuntimeError("Район або квартал не збігається з очікуваним")
+    # The optional district and quarter belong ONLY to DTEK_ADDRESS_JSON.
+    # Report presence without printing or hard-coding private geography.
+    print("Географія: район =", "налаштовано" if scope.get("district") else "не вказано")
+    print("Географія: квартал =", "налаштовано" if scope.get("quarter") else "не вказано")
     entry = await fetch_address_status(os.environ["DTEK_ADDRESS_JSON"])
     groups = verified_house_queues(entry.group_ids)
     print("ДТЕК підтвердив кількість черг будинку:", len(groups))

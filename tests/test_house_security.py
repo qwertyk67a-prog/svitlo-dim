@@ -163,3 +163,25 @@ def test_runner_gate_accepts_surrounding_spaces_but_rejects_other_values(tmp_pat
         )
         if expected_active is not None:
             assert f"active={expected_active}" in output.read_text(encoding="utf-8")
+
+
+def test_no_production_hardcoded_queue_or_private_district():
+    root=ROOT
+    core=(root/"bot.py").read_text(encoding="utf-8")
+    alerts=(root/"alerts.py").read_text(encoding="utf-8")
+    house=(root/"house_reliability.py").read_text(encoding="utf-8")
+    verifier=(root/"scripts/verify_address.py").read_text(encoding="utf-8")
+    live=(root/".github/workflows/check.yml").read_text(encoding="utf-8")
+    preview=(root/".github/workflows/audit-dry-run.yml").read_text(encoding="utf-8")
+    example=(root/".env.example").read_text(encoding="utf-8")
+    assert "6.2" not in core
+    assert "6.2" not in alerts
+    assert "6.2" not in house
+    assert "6.2" not in live
+    assert "6.2" not in preview
+    assert "6.2" not in example
+    assert "DTEK_GROUP:" not in live and "DTEK_GROUP:" not in preview
+    assert "129" not in verifier
+    assert "покровськ" not in verifier
+    assert "DTEK_ADDRESS_JSON" in live and "DTEK_ADDRESS_JSON" in preview
+    assert "get_schedule(house_groups)" in core

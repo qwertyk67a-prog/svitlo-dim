@@ -608,7 +608,7 @@ def address_clear_message(old, now):
     ))
 
 
-def address_decision(entry, state, now, expected="GPV6.2"):
+def address_decision(entry, state, now, expected=None):
     """One state transition per meaningful verified address change."""
     result = []
     if not entry:
@@ -664,13 +664,13 @@ def address_decision(entry, state, now, expected="GPV6.2"):
     previous = state.get("address:groups")
     current = sorted(set(entry.group_ids))
     if (previous is not None and previous != current) or (
-        previous is None and current and expected not in current
+        previous is None and current and expected and expected not in current
     ):
         label = ", ".join(x.removeprefix("GPV") for x in current)
         text = (
             "⚠️ <b>ДТЕК змінив чергу за адресою</b>\n"
             f"Наразі вказані черги: {html.escape(label or 'не визначено')}.\n"
-            "Перевірте актуальність автоматичних повідомлень за чергою 6.2.\n"
+            "Перевірте актуальність автоматичних повідомлень за цією адресою.\n"
             f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>'
         )
         result.append(("address", "address:groups", current, text))
