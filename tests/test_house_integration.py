@@ -136,7 +136,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     assert not stored.get("house:queue_hold")
 
     asyncio.run(bot.once())
-    assert len(calls) == 3
+    assert len(calls) == 2
 
 
 def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeypatch):
@@ -198,18 +198,18 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
 
     def send(_t,_c,text,deadline=None):
         calls.append(text)
-        if "Уточнено черги" in text:
+        if "ДТЕК оновив черги" in text:
             raise RuntimeError("Telegram unavailable for queue-change notice")
     monkeypatch.setattr(bot,"telegram_send",send)
     with pytest.raises(RuntimeError,match="Помилки Telegram"):
         asyncio.run(bot.once())
     assert any("Графік відключень" in x for x in calls)
-    assert not json.loads(state_file.read_text()).get("house:groups")
+    assert json.loads(state_file.read_text())["house:groups"] == ["GPV6.2"]
     # The schedule was delivered once; the one-time queue notice is retried.
     monkeypatch.setattr(bot,"telegram_send",
                         lambda _t,_c,text,deadline=None: calls.append(text))
     asyncio.run(bot.once())
-    assert sum("Уточнено черги" in x for x in calls) == 2
+    assert sum("ДТЕК оновив черги" in x for x in calls) == 2
     assert sum("Графік відключень" in x for x in calls) == 1
 
 
