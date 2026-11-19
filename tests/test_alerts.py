@@ -10,6 +10,7 @@ from alerts import (
     address_message,
     get_house_entry,
     normalized_house,
+    parse_dtek_date,
     official_posts,
     regional_event,
     region_candidates,
@@ -309,3 +310,14 @@ def test_unknown_address_restoration_time_explicit():
     result=address_decision(item,{},NOW)
     notice=next(x[3] for x in result if x[1]=="address:last_outage")
     assert "Орієнтовний час відновлення не зазначено" in notice
+
+
+
+def test_actual_dtek_alternate_clock_first_format_detected_correctly():
+    assert parse_dtek_date("15:00 08.11.2026")==parse_dtek_date("08.11.2026 15:00")
+    item=house(reason="Аварійні роботи",kind="2",
+               start="15:00 08.11.2026",end="21:00 08.11.2026")
+    result=address_decision(item,{},NOW)
+    notice=next(x[3] for x in result if x[1]=="address:last_outage")
+    assert "час початку вже минув" in notice
+    assert "21:00 08.11.2026" in notice
