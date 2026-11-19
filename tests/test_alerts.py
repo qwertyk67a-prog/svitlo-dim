@@ -116,7 +116,7 @@ def test_first_run_recent_active_emergency_notified_once():
     assert len(sends)==1
     assert sends[0][2]=="active"
     assert "Офіційне повідомлення опубліковано" in sends[0][3]
-    assert "не підтвердження відключення конкретного будинку" in sends[0][3]
+    assert "не підтверджує відключення кожної квартири" in sends[0][3]
     assert "official:last_id" not in state
     for _id,key,value,_message in results:state[key]=value
     assert not [x for x in scoped_candidates(page,state,NOW) if x[3]]
@@ -140,7 +140,7 @@ def test_recent_active_region_not_confused_with_actual_building_outage():
         NOW-timedelta(minutes=4),
     ))
     from alerts import regional_message
-    assert "не підтвердження відключення конкретного будинку" in regional_message(event)
+    assert "не підтверджує відключення кожної квартири" in regional_message(event)
 
 
 def test_new_status_once_and_repeated_status_silent():
@@ -330,14 +330,17 @@ def test_actual_dtek_alternate_clock_first_format_detected_correctly():
 
 
 
-def test_generic_regional_emergency_is_silent_even_when_dtek_announces_it():
-    """DTEK says oblast emergency, but not that the entire oblast is affected."""
+def test_generic_regional_emergency_is_relevant_but_house_status_unknown():
+    """Even partial restrictions in a containing region justify a cautious alert."""
     state={"official:last_id":10}
     post=html_page([fake_post(11,
         "Дніпропетровщина: запроваджено екстрені відключення")])
     rows=scoped_candidates(post,state,NOW)
-    assert not [r for r in rows if r[3]]
-    assert rows[-1][1]=="official:last_id"
+    notices=[r[3] for r in rows if r[3]]
+    assert len(notices)==1
+    assert "Дніпропетровська область" in notices[0]
+    assert "Фактичну наявність електроенергії у будинку не підтверджено" in notices[0]
+
 
 
 def test_exact_home_scoped_emergency_message_is_sent():
@@ -365,3 +368,42 @@ def test_late_dtek_announcement_recovered_at_next_check():
         NOW-timedelta(hours=5))])
     rows=scoped_candidates(post,state,NOW)
     assert len([r for r in rows if r[3]])==1
+
+
+
+def test_partial_pokrovskyi_district_notice_sent_only_with_private_scope():
+    from alerts import region_candidates
+    private_scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    page=html_page([fake_post(11,
+        "Кривий Ріг: частково знеструмлено Покровський район")])
+    narrow=region_candidates(page,{"official:last_id":10},NOW,scope=private_scope)
+    notes=[r[3] for r in narrow if r[3]]
+    assert len(notes)==1
+    assert "часткове знеструмлення" in notes[0]
+    assert "Невідомо, чи зачепило відключення конкретний будинок" in notes[0]
+    broad=region_candidates(page,{"official:last_id":10},NOW,scope=HOUSE_SCOPE)
+    assert not [r for r in broad if r[3]]
+
+
+def test_partial_quarter_notice_sent_only_for_matching_private_quarter():
+    from alerts import region_candidates
+    private_scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    page=html_page([fake_post(11,
+        "Кривий Ріг: частково знеструмлено 129 квартал")])
+    matches=region_candidates(page,{"official:last_id":10},NOW,scope=private_scope)
+    assert len([r for r in matches if r[3]])==1
+    miss=region_candidates(page,{"official:last_id":10},NOW,
+        scope={**private_scope,"quarter":"130 квартал"})
+    assert not [r for r in miss if r[3]]
+
+
+def test_partial_area_outage_report_detected_as_distinct_event():
+    event=regional_event(fake_post(13,
+        "Дніпропетровщина: частково знеструмлено область"))
+    assert event and event["kind"]=="area" and event["status"]=="active"
+
+
+def test_different_city_inside_the_same_oblast_is_silent():
+    page=html_page([fake_post(14,
+        "Дніпропетровщина: екстрені відключення лише у місті Нікополь")])
+    assert not [r for r in scoped_candidates(page,{"official:last_id":10},NOW) if r[3]]
