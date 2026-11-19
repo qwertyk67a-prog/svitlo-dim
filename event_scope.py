@@ -1,158 +1,168 @@
-"""Conservative geographical coverage checks for official DTEK announcements.
+"""Conservative geographical relevance for the privately configured house.
 
-Only an explicit blanket zone or an exact private house reference qualifies.
-A regional HEADLINE by itself never proves an outage affects the building.
-Do not store the private address in source code, logs or notification state.
+A PARTIAL outage of a territory containing the building is relevant.
+It is NOT proof the building itself has lost electricity.
+Never commit the private address or persist it in bot_state.json.
 """
 import json
 import re
 
-EXCLUSION = re.compile(
-    r"\b(?:крім|окрім|за\s+винятком|не\s+стосує\w*|не\s+поширює\w*|"
-    r"не\s+охоплює\w*|за\s+виключенням)\b",
-    re.I,
-)
 
-ALL_UKRAINE = (
-    r"\b(?:по\s+)?(?:всій|усій|цілій)\s+україн\w*\b",
-    r"\b(?:по\s+)?(?:всій|усій|цілій)\s+територі\w*\s+україн\w*\b",
-    r"\b(?:всіх|усіх)\s+област\w*\s+україн\w*\b",
-    r"\b(?:вся|уся|ціла)\s+україн\w*\b",
-    r"\bукраїн\w*\s+повністю\b",
-)
-
-ALL_DNIPRO_REGION = (
-    r"\b(?:по\s+)?(?:всій|усій|цілій)\s+дніпропетровськ\w*\s+област\w*\b",
-    r"\b(?:по\s+)?(?:всій|усій|цілій)\s+дніпропетровщин\w*\b",
-    r"\b(?:вся|уся|ціла)\s+дніпропетровськ\w*\s+област\w*\b",
-    r"\bдніпропетровськ\w*\s+област\w*\s+повністю\b",
-    r"\bдніпропетровщин\w*\s+повністю\b",
-    r"\b(?:всіх|усіх)\s+(?:споживач\w*|адрес\w*|будинк\w*)\s+"
-    r"дніпропетровськ\w*\s+област\w*\b",
-)
-
-ALL_KRYVYI_RIH = (
-    r"\b(?:весь|увесь|цілий)\s+(?:місто\s+)?крив(?:ий|ого|ому)\s+(?:ріг|рогу|розі)\b",
-    r"\b(?:всьому|усьому|цілому)\s+(?:місті\s+)?крив(?:ому|ий)\s+(?:розі|рогу|ріг)\b",
-    r"\bкрив(?:ий|ого|ому)\s+(?:ріг|рогу|розі)\s+повністю\b",
-    r"\b(?:всіх|усіх)\s+(?:споживач\w*|адрес\w*|будинк\w*)\s+"
-    r"(?:міста\s+)?кривого\s+рогу\b",
-)
-
-CITY_ALIASES = (
-    "кривий ріг", "кривого рогу", "кривому розі", "кривому рогу",
-)
-
-
-def _clean(text):
-    return re.sub(r"\s+", " ", str(text).casefold().replace("’", "'")).strip()
+def _clean(value):
+    return re.sub(r"\s+", " ", str(value).casefold().replace("’", "'")).strip()
 
 
 def house_scope_from_secret(secret):
-    """Use private address solely during runtime, never write to public state."""
-    raw = json.loads(secret)
+    """Only three fields are sent to DTEK; optional geography stays private."""
     from alerts import address_fields
+    raw = json.loads(secret)
     city, street, house = address_fields(secret)
-    scope = {"city": city, "street": street, "house": house}
-    for option in ("district", "quarter"):
-        value = raw.get(option, "")
+    result = {"city": city, "street": street, "house": house}
+    for optional in ("district", "quarter"):
+        value = raw.get(optional, "")
         if not isinstance(value, str) or len(value) > 120:
-            raise ValueError(f"Некоректне додаткове поле {option}")
-        scope[option] = value.strip()
-    return scope
+            raise ValueError(f"Некоректне додаткове поле {optional}")
+        result[optional] = value.strip()
+    return result
 
+
+CITY_NAMES = ("кривий ріг", "кривого рогу", "кривому розі", "кривому рогу")
+REGION_NAMES = ("дніпропетровщина", "дніпропетровщині", "дніпропетровщини")
+
+EXCEPTION = re.compile(
+    r"\b(?:крім|окрім|за\s+винятком|за\s+виключенням|"
+    r"не\s+стос\w*|не\s+поширю\w*|не\s+охоплю\w*)\b"
+)
+
+DISTRICT_NAME = re.compile(r"\b([а-яіїєґ'-]{4,})\s+район\w*\b")
+QUARTER_NAME = re.compile(r"\b(\d{1,4})\s*[- ]?\s*квартал\w*\b")
+OTHER_CITY = re.compile(
+    r"\b(?:в|у)\s+(?:місті\s+)?(?:дніпрі|нікополі|павлограді|"
+    r"кам'янському|самарі|жовтих водах)\b|"
+    r"\b(?:місто|місті|м\.)\s*(?:дніпро|нікополь|павлоград|"
+    r"кам'янське|самар|жовті води)\b"
+)
+OTHER_REGION = re.compile(
+    r"\b(?:харківськ\w*|київськ\w*|одеськ\w*|львівськ\w*|"
+    r"полтавськ\w*|запорізьк\w*|чернігівськ\w*)\s+област\w*\b"
+)
 
 def _known_city(scope):
     city = _clean(scope.get("city", ""))
     city = re.sub(r"^(?:м\.?|місто)\s+", "", city)
-    return city in CITY_ALIASES
+    return city in CITY_NAMES
 
 
-def _exact_house_reference(text, scope):
-    """Exact street+house together, not a street mentioned without house."""
-    street = _clean(scope.get("street", ""))
+def _exact_house(text, scope):
+    street = _clean(scope["street"])
     street = re.sub(r"^(?:вул\.?|вулиця|просп\.?|проспект)\s+", "", street)
     street = re.sub(r"\s+", r"\\s+", re.escape(street))
-    house = re.sub(r"[\s/\\.\-]", "", _clean(scope.get("house", "")))
-    m = re.fullmatch(r"(\d+)([а-яa-z]?)", house)
-    if not m or not street:
+    house = re.sub(r"[\s/\\.\-]", "", _clean(scope["house"]))
+    match = re.fullmatch(r"(\d+)([а-яіїєґa-z]?)", house)
+    if not match or not street:
         return False
-    number, suffix = m.groups()
-    suffix = {"a": "[aа]", "b": "[bв]", "i": "[iі]"}.get(
-        suffix, re.escape(suffix)
-    )
-    house_pattern = (
-        r"(?<!\d)" + re.escape(number) +
-        r"[\s/\\.\-]*" + suffix + r"(?![\w])"
-    )
-    # Require the house number near the correct street; a street-only
-    # outage or a different house number is not sufficient.
+    number, letter = match.groups()
+    letter = {"a": "[аa]", "b": "[вb]", "i": "[іi]"}.get(letter, re.escape(letter))
+    number_regex = rf"(?<!\d){re.escape(number)}[\s/\\.\-]*{letter}(?![\w])"
     return bool(re.search(
         rf"\b{street}\b[\s,;:№#.\-/\\]*(?:буд(?:инок)?\.?\s*№?\s*)?"
-        rf"[\s,;:№#.\-/\\]{{0,18}}{house_pattern}",
-        text,
+        rf"[\s,;:№#.\-/\\]{{0,18}}{number_regex}", text
     ))
 
 
-def _area_is_whole(text, stem, noun):
-    if not stem:
+def _district_matches(candidate, configured):
+    """Accept inflected forms, not a different district in the same city."""
+    expected = _clean(configured)
+    match = DISTRICT_NAME.search(expected)
+    if not match:
         return False
-    part = re.escape(stem) + r"\w*"
+    word = match.group(1)
+    # Покровський, Покровському and Покровського share "покров".
+    stem = re.sub(r"(?:ськ\w*|цк\w*|цьк\w*|ск\w*|ого|ому|ий)$", "", word)
+    return len(stem) >= 4 and candidate.startswith(stem)
+
+
+def _quarter_matches(number, configured):
+    match = QUARTER_NAME.search(_clean(configured))
+    return bool(match and match.group(1) == number)
+
+
+def _partial(text):
     return bool(re.search(
-        rf"\b(?:весь|увесь|цілий)\s+{part}\s+{noun}\w*\b|"
-        rf"\b(?:всьому|усьому|цілому)\s+{part}\s+{noun}\w*\b|"
-        rf"\b{part}\s+{noun}\w*\s+повністю\b",
-        text,
+        r"\b(?:частков\w*|частин\w*|деяк\w*|окрем\w*|"
+        r"кільк\w*|вибірков\w*|подекуди)\b", text
     ))
+
+
+def coverage_for_house(announcement, scope):
+    """Return coverage level when the declared affected AREA contains the house.
+
+    This deliberately avoids claiming the house lost voltage. When an
+    announcement specifies a smaller place, it takes priority over its
+    broad regional headline (e.g. "Dnipro region: only Nikopol").
+    """
+    if (not isinstance(scope, dict) or
+            any(not isinstance(scope.get(k), str) or not scope[k].strip()
+                for k in ("city", "street", "house"))):
+        return None
+    text = _clean(announcement)
+    if not text or EXCEPTION.search(text):
+        return None
+
+    if _exact_house(text, scope):
+        return {"level": "house", "partial": False, "label": "будинок"}
+
+    # Explicit narrower locality beats the broader regional headline.
+    districts = DISTRICT_NAME.findall(text)
+    if districts:
+        if any(_district_matches(word, scope.get("district", ""))
+               for word in districts):
+            return {
+                "level": "district", "partial": True,
+                "label": scope["district"].strip(),
+            }
+        return None
+
+    quarters = QUARTER_NAME.findall(text)
+    if quarters:
+        if any(_quarter_matches(number, scope.get("quarter", ""))
+               for number in quarters):
+            return {
+                "level": "quarter", "partial": True,
+                "label": scope["quarter"].strip(),
+            }
+        return None
+
+    if OTHER_CITY.search(text) and not any(name in text for name in CITY_NAMES):
+        return None
+    if OTHER_REGION.search(text) and not (
+        "дніпропетровськ" in text or any(name in text for name in REGION_NAMES)
+    ):
+        return None
+
+    if not _known_city(scope):
+        return None
+
+    if any(name in text for name in CITY_NAMES):
+        return {"level": "city", "partial": _partial(text),
+                "label": "Кривий Ріг"}
+
+    if "дніпропетровськ" in text or any(
+        name in text for name in REGION_NAMES
+    ):
+        return {"level": "region", "partial": _partial(text),
+                "label": "Дніпропетровська область"}
+
+    if re.search(
+        r"\b(?:україн\w*|усіх\s+област\w*|всіх\s+област\w*)\b",
+        text,
+    ):
+        return {"level": "country", "partial": _partial(text),
+                "label": "Україна"}
+
+    return None
 
 
 def covers_house(announcement, scope):
-    """True only for an unambiguous ALL-territory or exact-house notice.
-
-    Deliberately refuse ambiguous regional notices, exclusions and prose
-    about unrelated outages. Fail closed rather than generate noise.
-    """
-    if (not isinstance(scope, dict) or
-            any(not isinstance(scope.get(key), str) or not scope[key].strip()
-                for key in ("city", "street", "house"))):
-        return False
-    text = _clean(announcement)
-    if not text or EXCLUSION.search(text):
-        return False
-
-    if any(re.search(p, text) for p in ALL_UKRAINE):
-        return True
-
-    if not _known_city(scope):
-        # This bot is configured for DTEK dnem and its known city.
-        # A different city requires an explicit house match.
-        return _exact_house_reference(text, scope)
-
-    if any(re.search(p, text) for p in ALL_DNIPRO_REGION + ALL_KRYVYI_RIH):
-        return True
-
-    if _exact_house_reference(text, scope):
-        return True
-
-    # An entire district/quarter qualifies only with extra details in the
-    # private address secret AND an explicit city mention in the report.
-    if not any(name in text for name in CITY_ALIASES):
-        return False
-
-    district = _clean(scope.get("district", ""))
-    m = re.search(r"([а-яіїєґ]{5,})\w*\s+район\w*", district)
-    if m:
-        stem = re.sub(r"(?:ськ|цк|цьк|ск|ий|ого|ому)+$", "", m.group(1))
-        if _area_is_whole(text, stem, "район"):
-            return True
-    quarter = _clean(scope.get("quarter", ""))
-    qm = re.search(r"(?<!\d)(\d{1,4})\s*[- ]?\s*квартал", quarter)
-    if qm:
-        q = re.escape(qm.group(1))
-        if re.search(
-            rf"\b(?:весь|увесь|цілий)\s+{q}\s*[- ]?\s*квартал\w*\b|"
-            rf"\b{q}\s*[- ]?\s*квартал\w*\s+повністю\b",
-            text,
-        ):
-            return True
-    return False
+    """Compatibility boolean for pure geographical filtering."""
+    return coverage_for_house(announcement, scope) is not None
