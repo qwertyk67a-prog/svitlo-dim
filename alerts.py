@@ -410,9 +410,11 @@ def address_decision(entry, state, now, expected="GPV6.2"):
     old = state.get(key)
     event = address_event(entry)
     if event:
-        # Ignore stale past incidents that no longer affect today's plans.
+        # A late-published outage that already reached its explicitly
+        # announced end is not a useful NEW notification.
+        # Do not infer physical voltage from this estimated timestamp.
         finish = parse_dtek_date(event["end"])
-        if finish and finish < now and not isinstance(old, dict):
+        if finish and finish <= now:
             event = None
     if event:
         # Text edits to a reason are not new events. Only category or time
