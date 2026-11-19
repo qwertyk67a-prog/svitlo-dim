@@ -5,6 +5,7 @@ on:
       - bot.py
       - house_reliability.py
       - alerts.py
+      - event_scope.py
       - requirements.txt
       - .github/workflows/check.yml
       - .github/dependabot.yml
