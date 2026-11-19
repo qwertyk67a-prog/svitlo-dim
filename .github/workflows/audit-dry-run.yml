@@ -1,6 +1,16 @@
 name: Dry-run DTEK audit (no Telegram)
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/audit-dry-run.yml
+      - alerts.py
+      - bot.py
+      - event_scope.py
+      - house_reliability.py
+      - requirements.txt
+      - constraints.txt
 permissions:
   contents: read
 jobs:
