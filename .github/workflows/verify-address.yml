@@ -1,12 +1,6 @@
 name: Verify DTEK house address (no Telegram)
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/suppress-finished-late-outages-and-check-secret
-    paths:
-      - .github/workflows/verify-address.yml
-      - scripts/verify_address.py
 permissions:
   contents: read
 jobs:
