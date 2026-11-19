@@ -122,6 +122,47 @@ def _partial(text):
     ))
 
 
+def _exclusion_might_include_house(text, scope):
+    """Only infer an exemption when the place is positively outside home.
+
+    Unknown exceptions are ambiguous and suppress notifications.
+    """
+    match = EXCEPTION.search(text)
+    if not match:
+        return False
+    exception = text[match.end():]
+    if match.group(0).startswith("не "):
+        return True
+    if _exact_house(exception, scope):
+        return True
+    if any(name in exception for name in CITY_NAMES):
+        return True
+    if "дніпропетровськ" in exception or any(
+        word in exception for word in REGION_NAMES
+    ):
+        return True
+    districts = DISTRICT_NAME.findall(exception)
+    if districts:
+        configured = scope.get("district", "")
+        return not configured or any(
+            _district_matches(name, configured) for name in districts
+        )
+    quarters = QUARTER_NAME.findall(exception)
+    if quarters:
+        configured = scope.get("quarter", "")
+        return not configured or any(
+            _quarter_matches(number, configured) for number in quarters
+        )
+    if re.search(
+        r"\b(?:нікопол\w*|павлоград\w*|кам'янськ\w*|"
+        r"дніпрі|дніпра|жовт\w*\s+вод\w*)\b", exception,
+    ):
+        return False
+    if OTHER_REGION.search(exception):
+        return False
+    return True
+
+
 def coverage_for_house(announcement, scope):
     """Return coverage level when the declared affected AREA contains the house.
 
@@ -134,7 +175,7 @@ def coverage_for_house(announcement, scope):
                 for k in ("city", "street", "house"))):
         return None
     text = _clean(announcement)
-    if not text or EXCEPTION.search(text):
+    if not text or _exclusion_might_include_house(text, scope):
         return None
 
     if _exact_house(text, scope):
