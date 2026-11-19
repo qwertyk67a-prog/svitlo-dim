@@ -112,7 +112,9 @@ def covers_house(announcement, scope):
     Deliberately refuse ambiguous regional notices, exclusions and prose
     about unrelated outages. Fail closed rather than generate noise.
     """
-    if not isinstance(scope, dict):
+    if (not isinstance(scope, dict) or
+            any(not isinstance(scope.get(key), str) or not scope[key].strip()
+                for key in ("city", "street", "house"))):
         return False
     text = _clean(announcement)
     if not text or EXCLUSION.search(text):
