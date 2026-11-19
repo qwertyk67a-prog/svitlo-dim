@@ -166,6 +166,22 @@ def coverage_for_house(announcement, scope):
         r"\b(?:україн\w*|усіх\s+област\w*|всіх\s+област\w*)\b",
         text,
     ):
+        # "В окремих областях України" does not establish that this
+        # particular oblast is affected. A nationwide announcement does.
+        nationwide = bool(re.search(
+            r"(?:по|на|у|в)\s+(?:всій|усій|цілій)\s+україн\w*|"
+            r"(?:всіх|усіх)\s+област\w*|"
+            r"(?:всій|усій)\s+територі\w*\s+україн\w*|"
+            r"україн\w*\s+повністю", text,
+        ))
+        unspecified_subset = bool(re.search(
+            r"(?:деяк\w*|окрем\w*|кільк\w*|певн\w*|частин\w*)\s+"
+            r"(?:област\w*|регіон\w*|міст\w*)|"
+            r"(?:частин\w*|деяк\w*\s+територі\w*)\s+україн\w*",
+            text,
+        ))
+        if unspecified_subset and not nationwide:
+            return None
         return {"level": "country", "partial": _partial(text),
                 "label": "Україна"}
 
