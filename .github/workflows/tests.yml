@@ -32,4 +32,15 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pytest PyYAML
       - run: python -m pip check
+      - name: Report whether repository activation variable is visible
+        env:
+          CONFIGURED_BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+        run: |
+          if [[ "$CONFIGURED_BOT_ENABLED" == "true" ]]; then
+            echo "ACTIVATION_DIAGNOSTIC: enabled (exact match)"
+          elif [[ -z "$CONFIGURED_BOT_ENABLED" ]]; then
+            echo "ACTIVATION_DIAGNOSTIC: missing or empty"
+          else
+            echo "ACTIVATION_DIAGNOSTIC: present but not exact true"
+          fi
       - run: python -m pytest -q tests/
