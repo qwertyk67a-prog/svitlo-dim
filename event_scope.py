@@ -113,7 +113,7 @@ def _district_matches(candidate, configured):
     if not match:
         return False
     word = match.group(1)
-    # Покровський, Покровському and Покровського share "покров".
+    # Ukrainian district names can have different grammatical endings.
     stem = re.sub(r"(?:ськ\w*|цк\w*|цьк\w*|ск\w*|ого|ому|ий)$", "", word)
     return len(stem) >= 4 and candidate.startswith(stem)
 

@@ -306,7 +306,7 @@ def test_address_outage_discovered_after_started_time_explains_late_information(
     assert "Інформацію виявлено" in notice
     assert "не вимірює фактичну" in notice
     assert "21:00" in notice
-    assert "Кропивницького" not in notice
+    assert "Вулиця_Зразок" not in notice
 
 
 def test_future_address_outage_does_not_claim_it_already_started():
@@ -381,9 +381,9 @@ def test_late_dtek_announcement_recovered_at_next_check():
 
 def test_partial_pokrovskyi_district_notice_sent_only_with_private_scope():
     from alerts import region_candidates
-    private_scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    private_scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     page=html_page([fake_post(11,
-        "Кривий Ріг: частково знеструмлено Покровський район")])
+        "Кривий Ріг: частково знеструмлено Зразковий район")])
     narrow=region_candidates(page,{"official:last_id":10},NOW,scope=private_scope)
     notes=[r[3] for r in narrow if r[3]]
     assert len(notes)==1
@@ -395,9 +395,9 @@ def test_partial_pokrovskyi_district_notice_sent_only_with_private_scope():
 
 def test_partial_quarter_notice_sent_only_for_matching_private_quarter():
     from alerts import region_candidates
-    private_scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    private_scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     page=html_page([fake_post(11,
-        "Кривий Ріг: частково знеструмлено 129 квартал")])
+        "Кривий Ріг: частково знеструмлено 987 квартал")])
     matches=region_candidates(page,{"official:last_id":10},NOW,scope=private_scope)
     assert len([r for r in matches if r[3]])==1
     miss=region_candidates(page,{"official:last_id":10},NOW,
@@ -419,9 +419,9 @@ def test_different_city_inside_the_same_oblast_is_silent():
 
 
 def test_partial_area_restoration_notified_only_after_prior_area_alert():
-    scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     first=html_page([fake_post(11,
-        "Кривий Ріг: частково знеструмлено Покровський район")])
+        "Кривий Ріг: частково знеструмлено Зразковий район")])
     state={"official:last_id":10}
     opened=region_candidates(first,state,NOW,scope=scope)
     first_messages=[r[3] for r in opened if r[3]]
@@ -429,7 +429,7 @@ def test_partial_area_restoration_notified_only_after_prior_area_alert():
     for _id,key,value,_message in opened:
         state[key]=value
     restored=html_page([fake_post(12,
-        "Кривий Ріг: відновлено електропостачання у Покровському районі")])
+        "Кривий Ріг: відновлено електропостачання у Зразковому районі")])
     ended=region_candidates(restored,state,NOW,scope=scope)
     sent=[r[3] for r in ended if r[3]]
     assert len(sent)==1
@@ -440,9 +440,9 @@ def test_partial_area_restoration_notified_only_after_prior_area_alert():
 
 
 def test_partial_area_restoration_without_prior_event_is_silent():
-    scope={**HOUSE_SCOPE,"district":"Покровський район","quarter":"129 квартал"}
+    scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     page=html_page([fake_post(15,
-        "Кривий Ріг: відновлено електропостачання у Покровському районі")])
+        "Кривий Ріг: відновлено електропостачання у Зразковому районі")])
     rows=region_candidates(page,{"official:last_id":14},NOW,scope=scope)
     assert not [r for r in rows if r[3]]
 
@@ -586,8 +586,8 @@ def test_address_date_only_end_is_not_treated_as_expired():
 
 def test_house_number_separators_not_confused():
     assert normalized_house("1/1") != normalized_house("11")
-    assert normalized_house("67-А") == normalized_house("67А")
-    assert normalized_house("67/А") != normalized_house("67А")
+    assert normalized_house("42-А") == normalized_house("42А")
+    assert normalized_house("42/А") != normalized_house("42А")
 
 
 def test_regional_transition_to_gpv_ends_emergency():
@@ -700,9 +700,9 @@ def test_private_house_lookup_failure_logs_only_counts(caplog):
 def test_letter_suffix_separator_is_a_unique_alias_only():
     from alerts import get_house_entry
     record = house(groups=("GPV6.2",))
-    response = SimpleNamespace(houses={"67/А": record})
-    assert get_house_entry(response, "67А") is record
-    assert get_house_entry(response, "67-А") is record
+    response = SimpleNamespace(houses={"42/А": record})
+    assert get_house_entry(response, "42А") is record
+    assert get_house_entry(response, "42-А") is record
 
 
 def test_numeric_slash_does_not_become_house_eleven():
@@ -718,9 +718,9 @@ def test_numeric_slash_does_not_become_house_eleven():
 
 def test_ambiguous_letter_suffix_alias_is_rejected():
     from alerts import get_house_entry
-    response = SimpleNamespace(houses={"67/А": house(), "67.А": house()})
+    response = SimpleNamespace(houses={"42/А": house(), "42.А": house()})
     try:
-        get_house_entry(response,"67А")
+        get_house_entry(response,"42А")
     except RuntimeError:
         pass
     else:
