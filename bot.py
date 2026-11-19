@@ -569,6 +569,7 @@ async def once():
             if cached:
                 try:
                     house_groups = verified_house_queues(cached)
+                    house_snapshot = list(house_groups)
                     LOG.warning("Використовую останні підтверджені черги будинку")
                 except ValueError:
                     house_groups = None
@@ -765,7 +766,12 @@ async def once():
             continue
         last_send = time.monotonic()
         if origin == "official":
-            state["official:last_id"] = cursor
+            state["official:last_id"] = max(
+                int(state.get("official:last_id", 0)), int(cursor)
+            )
+            # One record per delivered announcement, not merely a status
+            # shared between all incidents of the same regional type.
+            state[f"official:event:{cursor}"] = value
         state[key] = value
         state_write(path, state)
         sent += 1
