@@ -70,6 +70,34 @@ def _exact_house(text, scope):
     ))
 
 
+def _matching_street_without_other_house(text, scope):
+    """A named whole/partial street can contain the house.
+
+    A message naming another specific building on the street is insufficient.
+    Exact-house matching has already been attempted by the caller.
+    """
+    configured = _clean(scope.get("street", ""))
+    configured = re.sub(
+        r"^(?:вул\.?|вулиця|просп\.?|проспект)\s+", "", configured
+    )
+    if not configured:
+        return False
+    escaped = re.escape(configured).replace(r"\ ", r"\s+")
+    match = re.search(
+        rf"\b(?:вул\.?|вулиця|просп\.?|проспект)\s+{escaped}\b", text
+    )
+    if not match:
+        return False
+    next_part = text[match.end():match.end() + 70]
+    if re.search(
+        r"^\s*[,;:№#\-/ ]*\d+[а-яa-z]?\b|"
+        r"\b(?:будинок|буд\.?|будинки|№)\s*[\d№]",
+        next_part,
+    ):
+        return False
+    return True
+
+
 def _district_matches(candidate, configured):
     """Accept inflected forms, not a different district in the same city."""
     expected = _clean(configured)
@@ -111,6 +139,10 @@ def coverage_for_house(announcement, scope):
 
     if _exact_house(text, scope):
         return {"level": "house", "partial": False, "label": "будинок"}
+
+    if _matching_street_without_other_house(text, scope):
+        return {"level": "street", "partial": _partial(text),
+                "label": "вулиця будинку"}
 
     # If a report specifies ANOTHER address, the wider city header does not
     # make that address relevant. A street-only notice is also insufficient.
