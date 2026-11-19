@@ -514,10 +514,13 @@ async def once():
     house = None
     house_groups = None
     queue_change = None
+    regional_scope = None
     private_address = os.getenv("DTEK_ADDRESS_JSON", "").strip()
     if private_address:
         try:
             from alerts import fetch_address_status
+            from event_scope import house_scope_from_secret
+            regional_scope = house_scope_from_secret(private_address)
             house = await fetch_address_status(private_address)
             house_groups = verified_house_queues(
                 house.group_ids if house is not None else None
@@ -562,7 +565,9 @@ async def once():
     if os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
         try:
             from alerts import fetch_official_page, region_candidates
-            events = region_candidates(fetch_official_page(), state, now)
+            events = region_candidates(
+                fetch_official_page(), state, now, scope=regional_scope
+            )
             for post_id, key, value, message in events:
                 enqueue(0, key, value, message, "official", cursor=post_id)
             if not events and "official:last_id" in state:
