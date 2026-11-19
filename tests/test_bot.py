@@ -165,13 +165,10 @@ def test_tomorrow_confirmed_schedule_is_separate():
     }
 
 
-def test_initial_weekly_template_without_active_restriction_silent():
+def test_weekly_forecast_does_not_require_daily_fact():
     source = fake_source(weekly={7: {"1": "maybe"}})
-    assert candidates(source) == []
-    source = fake_source(
-        actual={TODAY: {GROUP: dict(CLEAR)}},
-        weekly={7: {"1": "maybe"}},
-    )
+    assert [row[2] for row in candidates(source)] == ["week"]
+    source = fake_source(weekly={7: {"1": "maybe"}}, active=False)
     assert candidates(source) == []
 
 
@@ -289,3 +286,16 @@ def test_no_late_warning_for_future_or_tomorrow_or_only_possible_slot():
     assert not newly_current_schedule_outage(TODAY,[(17*60,18*60,"off")],None,now)
     assert not newly_current_schedule_outage(TOMORROW,[(16*60,18*60,"off")],None,now)
     assert not newly_current_schedule_outage(TODAY,[(16*60,18*60,"maybe")],None,now)
+
+
+def test_day_message_full_day_total_includes_past_outages():
+    now = datetime(2026, 11, 8, 16, 0, tzinfo=KYIV)
+    original = [(60, 120, "off"), (1000, 1060, "off")]
+    from bot import upcoming_spans
+    visible = upcoming_spans(TODAY, original, now)
+    assert len(visible) == 1
+    text = day_message(TODAY, GROUP, visible, observed_at=now,
+                       total_spans=original)
+    assert "Загалом за добу" in text
+    assert "2 год" in text
+    assert "01:00–02:00" not in text
