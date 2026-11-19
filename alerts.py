@@ -58,7 +58,9 @@ def regional_event(post):
         return None
     title = re.sub(r"^[^А-Яа-яІіЇїЄєҐґ]+", "", lines[0]).strip().casefold()
     target = re.match(
-        r"^(дніпропетровщина|дніпропетровська область|кривий ріг)\s*:",
+        r"^(дніпропетровщина|дніпропетровська область|кривий ріг|"
+        r"україна|укренерго|дтек|"
+        r"[а-яіїєґ][а-яіїєґ\- ]+ район|[0-9 ]+ квартал)\s*:",
         title,
     )
     if not target:
@@ -77,9 +79,16 @@ def regional_event(post):
     else:
         # Ambiguous headlines must never generate residents' alerts.
         return None
+    area_label = (
+        "Кривий Ріг" if area == "кривий ріг"
+        else "Дніпропетровська область" if area in (
+            "дніпропетровщина", "дніпропетровська область"
+        )
+        else "Україна" if area in ("україна", "укренерго")
+        else area.capitalize()
+    )
     return {"kind": kind, "status": status,
-            "area": "Кривий Ріг" if area == "кривий ріг" else "Дніпропетровська область",
-            "post": post}
+            "area": area_label, "post": post}
 
 
 def regional_message(event):
@@ -106,10 +115,11 @@ def regional_message(event):
     ))
 
 
-def region_candidates(page, state, now):
+def region_candidates(page, state, now, scope=None):
     posts = official_posts(page)
     if not posts:
         raise RuntimeError("Не вдалося прочитати офіційний канал ДТЕК")
+    from event_scope import covers_house
     old_id = state.get("official:last_id")
     max_id = max(p["id"] for p in posts)
     if old_id is None:
@@ -122,7 +132,7 @@ def region_candidates(page, state, now):
             if not timedelta(0) <= age <= timedelta(hours=2):
                 continue
             event = regional_event(post)
-            if event:
+            if event and covers_house(post["text"], scope):
                 latest_by_kind[event["kind"]] = event
         pending_initial = []
         for kind, event in latest_by_kind.items():
@@ -149,7 +159,7 @@ def region_candidates(page, state, now):
         if post["id"] <= old_id:
             continue
         event = regional_event(post)
-        if not event:
+        if not event or not covers_house(post["text"], scope):
             continue
         if post["date"] > now + timedelta(minutes=10):
             continue
