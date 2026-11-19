@@ -72,7 +72,8 @@ def regional_event(post):
         kind = "emergency"
     elif re.search(
         r"\b(?:знеструмл\w*|без\s+світла|"
-        r"(?:відсутн\w*|припинен\w*)\s+електропостачан\w*)\b",
+        r"(?:відсутн\w*|припинен\w*|відновлен\w*|відновл\w*)\s+"
+        r"електропостачан\w*|заживлен\w*)\b",
         title,
     ):
         kind = "area"
@@ -129,18 +130,28 @@ def regional_message(event):
     place_note = (
         f"Зазначена територія: {label}. "
         "Будинок розташований у цій території."
+        if coverage.get("level") != "house" else
+        "ДТЕК прямо зазначив цей будинок."
     )
-    uncertainty = (
-        "ДТЕК повідомляє про часткове знеструмлення на території. "
-        "Невідомо, чи зачепило відключення конкретний будинок."
-        if coverage.get("partial") else
-        "Інформація стосується території, до якої входить будинок. "
-        "Фактичну наявність електроенергії у будинку не підтверджено."
-    )
-    if coverage.get("level") == "house":
+    if not active:
+        uncertainty = (
+            "За повідомленням ДТЕК, попередній режим для території завершено. "
+            "Це не підтверджує наявність електроенергії у кожному будинку."
+        )
+    elif coverage.get("level") == "house":
         uncertainty = (
             "Подія зазначена для будинку за адресою. "
             "Бот не вимірює фактичну наявність електроенергії."
+        )
+    elif coverage.get("partial"):
+        uncertainty = (
+            "ДТЕК повідомляє про часткове знеструмлення на території. "
+            "Невідомо, чи зачепило відключення конкретний будинок."
+        )
+    else:
+        uncertainty = (
+            "Інформація стосується території, до якої входить будинок. "
+            "Фактичну наявність електроенергії у будинку не підтверджено."
         )
     reported = event["post"]["date"].astimezone(KYIV).strftime("%d.%m.%Y %H:%M")
     return "\n".join((
@@ -173,13 +184,13 @@ def region_candidates(page, state, now, scope=None):
             coverage = coverage_for_house(post["text"], scope) if event else None
             if event and coverage:
                 event["coverage"] = coverage
-                latest_by_kind[event["kind"]] = event
+                latest_by_kind[(event["kind"], coverage["level"])] = event
         pending_initial = []
-        for kind, event in latest_by_kind.items():
+        for (kind, level), event in latest_by_kind.items():
             if event["status"] != "active":
                 continue
             pending_initial.append((
-                event["post"]["id"], f"official:status:{kind}", "active",
+                event["post"]["id"], f"official:status:{kind}:{level}", "active",
                 regional_message(event),
             ))
         if pending_initial:
@@ -208,7 +219,7 @@ def region_candidates(page, state, now, scope=None):
         if now - post["date"] > timedelta(hours=6):
             continue
         # Track transitions within a batch, not just the saved initial state.
-        key = f"official:status:{event['kind']}"
+        key = f"official:status:{event['kind']}:{coverage['level']}"
         previous = simulated.get(key, state.get(key, "unknown"))
         if event["status"] == "active":
             if previous != "active":
