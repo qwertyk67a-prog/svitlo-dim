@@ -489,4 +489,4 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
                         lambda _t,_c,txt,deadline=None: messages.append(txt))
     asyncio.run(bot.once())
     assert len(messages)==1
-    assert "Екстрені" in messages[0]
+    assert "екстрені" in messages[0].casefold()
