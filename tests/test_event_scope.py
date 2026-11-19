@@ -121,3 +121,22 @@ def test_some_regions_of_ukraine_do_not_prove_this_region_is_affected():
     )
     assert all(not covers_house(text,FULL) for text in examples)
     assert covers_house("Укренерго: обмеження по всій Україні",FULL)
+
+
+
+def test_matching_street_partial_outage_is_relevant_without_house_number():
+    report="Кривий Ріг: частково знеструмлена вул. Умовна"
+    got=coverage_for_house(report,FULL)
+    assert got and got["level"]=="street" and got["partial"]
+
+
+def test_specific_other_house_on_our_street_is_not_relevant():
+    assert not covers_house(
+        "Кривий Ріг: аварійне відключення, вул. Умовна, буд. 12Д", FULL
+    )
+    assert not covers_house(
+        "Кривий Ріг: вул. Умовна, 12Д без світла", FULL
+    )
+    assert not covers_house(
+        "Кривий Ріг: частково знеструмлена вул. Інша",FULL
+    )
