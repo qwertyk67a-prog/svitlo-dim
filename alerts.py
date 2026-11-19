@@ -516,16 +516,34 @@ def address_decision(entry, state, now, expected="GPV6.2"):
     key = "address:last_outage"
     old = state.get(key)
     event = address_event(entry)
+    old_active = isinstance(old, dict) and old.get("status") == "active"
+    old_end = parse_dtek_date(old.get("end")) if old_active else None
+    # A date without a clock time is NOT evidence of an ended event.
+    exact_end = bool(event and re.fullmatch(
+        r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|"
+        r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["end"]
+    ))
+    finish = parse_dtek_date(event["end"]) if exact_end else None
+    if event and finish and finish <= now:
+        if old_active and old_end and old_end > now:
+            # DTEK explicitly revised the estimate to a time already past.
+            # This is an early schedule correction, not voltage telemetry.
+            message = "\n".join((
+                "🔄 <b>ДТЕК уточнив орієнтовний час завершення</b>",
+                "Нове орієнтовне завершення: " + html.escape(event["end"]),
+                "Зазначений час уже минув.",
+                "Фактичне відновлення електроенергії в будинку не підтверджено.",
+                f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>',
+            ))
+            result.append(("address", key, {
+                "status": "expired", "end": event["end"],
+            }, message))
+        elif old_active:
+            result.append(("address", key, {
+                "status": "expired", "end": event["end"],
+            }, None))
+        event = None
     if event:
-        # A late-published outage that already reached its explicitly
-        # announced end is not a useful NEW notification.
-        # Do not infer physical voltage from this estimated timestamp.
-        finish = parse_dtek_date(event["end"])
-        if finish and finish <= now:
-            event = None
-    if event:
-        # Text edits to a reason are not new events. Only category or time
-        # changes should trigger another notification for the entire building.
         fingerprint = {k: event[k] for k in ("category", "start", "end")}
         digest = hashlib.sha256(json.dumps(
             fingerprint, sort_keys=True, ensure_ascii=False
@@ -535,11 +553,13 @@ def address_decision(entry, state, now, expected="GPV6.2"):
                 "digest": digest,
                 "end": event["end"],
                 "status": "active",
-            }, address_message(event, changed=isinstance(old, dict) and
-                               old.get("status") == "active", now=now)))
-    elif isinstance(old, dict) and old.get("status") == "active":
-        msg = address_clear_message({"end": old.get("end") or (old.get("event") or {}).get("end", "")}, now)
-        result.append(("address", key, {"status": "inactive"}, msg))
+            }, address_message(event, changed=old_active, now=now)))
+    elif not exact_end and old_active and old_end and old_end <= now:
+        # Disappearance from the address API is NOT proof of cancellation.
+        # Expire an elapsed estimate silently, without claiming restoration.
+        result.append(("address", key, {
+            "status": "expired", "end": old.get("end"),
+        }, None))
     # Group changes need human attention. Do not broadcast initial group assignment.
     previous = state.get("address:groups")
     current = sorted(set(entry.group_ids))
