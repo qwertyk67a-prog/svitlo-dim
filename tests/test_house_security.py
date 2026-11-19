@@ -89,3 +89,15 @@ def test_dependencies_pinned_against_compatible_constraints():
     assert "beautifulsoup4==" in requirements
     assert "dtek-blackout-client==" in requirements
     assert "playwright==" in (ROOT / "constraints.txt").read_text()
+
+
+def test_telegram_setup_is_manual_read_only_and_does_not_activate_monitoring():
+    content=(ROOT/".github/workflows/telegram-setup.yml").read_text()
+    assert "workflow_dispatch" in content
+    assert "contents: read" in content
+    assert "secrets.TELEGRAM_BOT_TOKEN" in content
+    assert "secrets.TELEGRAM_CHAT_ID" in content
+    assert "DTEK_ADDRESS_JSON" not in content
+    assert "BOT_ENABLED" not in content
+    assert "python -m scripts.telegram_setup" in content
+    assert "sendMessage" not in content
