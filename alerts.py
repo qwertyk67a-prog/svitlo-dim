@@ -249,7 +249,7 @@ async def fetch_address_status(secret):
 def parse_dtek_date(raw):
     if not raw:
         return None
-    for pattern in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+    for pattern in ("%d.%m.%Y %H:%M", "%H:%M %d.%m.%Y", "%d.%m.%Y"):
         try:
             return datetime.strptime(str(raw), pattern).replace(tzinfo=KYIV)
         except ValueError:
@@ -296,7 +296,7 @@ def address_message(event, changed=False, now=None):
     finish = parse_dtek_date(event["end"])
     # A date without a clock time does not establish an exact start moment.
     has_exact_start = bool(re.fullmatch(
-        r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}", event["start"]
+        r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["start"]
     ))
     already_started = bool(now and has_exact_start and start and
                            start < now and (not finish or finish > now))
