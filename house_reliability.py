@@ -91,7 +91,7 @@ def verified_house_queues(raw) -> tuple[str, ...]:
 
 
 def house_queue_transition(state: dict, groups: tuple[str, ...],
-                           default_group: str) -> tuple[list[str], str | None]:
+                           default_group: str | None = None) -> tuple[list[str], str | None]:
     """Compare verified queue sets and construct one Ukrainian change notice.
 
     Do NOT update state before successful sending. The caller persists
@@ -104,9 +104,10 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     if has_previous:
         previous = verified_house_queues(previous)
     else:
-        # The previous fixed queue was a monitoring preference, not proof of
-        # the actual electrical wiring of this building.
-        previous = verified_house_queues([default_group])
+        # A fresh installation has no verified previous queue.
+        # Never imply a change from a hard-coded or manually suggested queue.
+        # default_group is retained only for compatibility with old callers.
+        previous = current
 
     prior = set(previous)
     live = set(current)

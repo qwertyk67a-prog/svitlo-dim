@@ -129,12 +129,10 @@ def test_old_queue_removed_but_remaining_queue_stays_active():
     assert "Додано:" not in msg
 
 
-def test_initial_address_lookup_differs_from_previous_monitored_queue():
+def test_initial_verified_queues_are_baselined_without_false_change():
     groups, msg = house_queue_transition({}, ("GPV4.1", "GPV4.2"), GROUP)
     assert groups == ["GPV4.1", "GPV4.2"]
-    assert "Раніше відстежували: 6.2" in msg
-    assert "Додано: 4.1, 4.2" in msg
-    assert "призупинено" not in msg
+    assert msg is None
 
 
 def test_invalid_ambiguous_and_missing_groups_are_not_deletions():
@@ -153,8 +151,8 @@ def test_legacy_queue_hold_not_used_for_auto_tracking():
     }}
     groups, msg = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert groups == ["GPV5.1"]
-    assert "продовжує" in msg
-    assert "secret" not in msg
+    assert msg is None  # A queue_hold alone proves no prior queue.
+    assert "secret" not in str(msg)
 
 
 

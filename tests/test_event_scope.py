@@ -11,7 +11,7 @@ DEFAULT = {
     "city": "м. Кривий Ріг", "street": "вул. Умовна", "house": "12Г",
 }
 FULL = {
-    **DEFAULT, "district": "Покровський район", "quarter": "129 квартал",
+    **DEFAULT, "district": "Зразковий район", "quarter": "987 квартал",
 }
 
 
@@ -43,25 +43,25 @@ def test_entire_territory_and_restoration_are_relevant():
         "Україна: обмеження запроваджені в усіх областях України",
         "Дніпропетровщина: екстрені відключення по всій Дніпропетровській області",
         "Кривий Ріг: екстрені відключення діють у всьому місті Кривому Розі",
-        "Кривий Ріг: відновлено електропостачання після знеструмлення у Покровському районі",
-        "Кривий Ріг: частково знеструмлено у 129 кварталі",
+        "Кривий Ріг: відновлено електропостачання після знеструмлення у Зразковому районі",
+        "Кривий Ріг: частково знеструмлено у 987 кварталі",
     )
     assert all(covers_house(text,FULL) for text in positive)
 
 
 def test_partial_district_and_quarter_require_private_metadata():
     district=coverage_for_house(
-        "Кривий Ріг: частково знеструмлений Покровський район",FULL)
+        "Кривий Ріг: частково знеструмлений Зразковий район",FULL)
     assert district and district["level"]=="district"
     assert district["partial"] is True
     quarter=coverage_for_house(
-        "Кривий Ріг: частково знеструмлено 129 квартал",FULL)
+        "Кривий Ріг: частково знеструмлено 987 квартал",FULL)
     assert quarter and quarter["level"]=="quarter"
     assert quarter["partial"] is True
     assert not covers_house(
-        "Кривий Ріг: частково знеструмлений Покровський район",DEFAULT)
+        "Кривий Ріг: частково знеструмлений Зразковий район",DEFAULT)
     assert not covers_house(
-        "Кривий Ріг: частково знеструмлено 129 квартал",DEFAULT)
+        "Кривий Ріг: частково знеструмлено 987 квартал",DEFAULT)
 
 
 def test_other_quarter_district_and_city_are_not_our_house():
@@ -94,7 +94,7 @@ def test_exact_house_reference_matches_but_neighbor_does_not():
 def test_exception_to_area_makes_coverage_uncertain_so_silent():
     for t in (
         "В усій Дніпропетровській області, крім Кривого Рогу, введено відключення",
-        "У всьому Кривому Розі, за винятком Покровського району, діють обмеження",
+        "У всьому Кривому Розі, за винятком Зразкового району, діють обмеження",
         "ДТЕК: екстрені відключення не стосуються цього будинку: вул. Умовна 12Г",
     ):
         assert not covers_house(t,FULL)
@@ -109,8 +109,8 @@ def test_private_fields_are_optional_and_stay_runtime_only():
     basic=house_scope_from_secret(json.dumps(DEFAULT,ensure_ascii=False))
     assert basic["district"]=="" and basic["quarter"]==""
     extended=house_scope_from_secret(json.dumps(FULL,ensure_ascii=False))
-    assert extended["district"]=="Покровський район"
-    assert extended["quarter"]=="129 квартал"
+    assert extended["district"]=="Зразковий район"
+    assert extended["quarter"]=="987 квартал"
 
 
 
@@ -162,7 +162,7 @@ def test_excluding_other_district_keeps_our_district_notification():
     )
     assert not covers_house(
         "Кривий Ріг: екстрені відключення по всьому місту, "
-        "крім Покровського району",FULL
+        "крім Зразкового району",FULL
     )
 
 

@@ -452,7 +452,9 @@ async def get_schedule(group_ids=None):
 
     from house_reliability import verified_house_queues
     if group_ids is None:
-        group = os.getenv("DTEK_GROUP", "6.2").strip()
+        group = os.getenv("DTEK_GROUP", "").strip()
+        # No default house queue: unverified tracking is permitted only
+        # when an explicit test override is deliberately supplied.
         if not re.fullmatch(r"[1-6]\.[12]", group):
             raise RuntimeError("Некоректна черга ДТЕК")
         group_ids = ("GPV" + group,)
@@ -530,8 +532,8 @@ async def once():
 
     now = datetime.now(KYIV)
     today = now.date()
-    selected = os.getenv("DTEK_GROUP", "6.2").strip()
-    group_id = "GPV" + selected
+    selected = os.getenv("DTEK_GROUP", "").strip()
+    group_id = "GPV" + selected if selected else None
     leads = parse_reminder_minutes(os.getenv("REMINDER_MINUTES", "0"))
     trim_state(state, today)
     persist()
@@ -540,7 +542,7 @@ async def once():
     sent = 0
 
     # A DTEK address may have multiple queues. Never infer assignments
-    # from the previously configured single DTEK_GROUP.
+    # from a fixed house queue; use only verified address data.
     house = None
     house_groups = None
     queue_change = None
@@ -560,7 +562,7 @@ async def once():
                 house.group_ids if house is not None else None
             )
             house_snapshot, queue_change = house_queue_transition(
-                state, house_groups, group_id
+                state, house_groups
             )
             # The old approval/hold mechanism is obsolete. The current
             # confirmed queues govern automatic tracking after migration.
