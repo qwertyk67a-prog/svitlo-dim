@@ -27,7 +27,7 @@ def test_region_named_as_affected_is_relevant_even_if_only_partially():
          "city", True),
         ("Кривий Ріг: запроваджені екстрені відключення",
          "city", False),
-        ("Україна: запроваджено екстрені відключення у деяких регіонах",
+        ("Україна: часткові обмеження по всій Україні",
          "country", True),
     )
     for event, level, partial in examples:
@@ -110,3 +110,14 @@ def test_private_fields_are_optional_and_stay_runtime_only():
     extended=house_scope_from_secret(json.dumps(FULL,ensure_ascii=False))
     assert extended["district"]=="Покровський район"
     assert extended["quarter"]=="129 квартал"
+
+
+
+def test_some_regions_of_ukraine_do_not_prove_this_region_is_affected():
+    examples=(
+        "Україна: екстрені відключення у деяких регіонах",
+        "Україна: обмеження запроваджені в кількох областях",
+        "Укренерго: в окремих областях України запроваджені обмеження",
+    )
+    assert all(not covers_house(text,FULL) for text in examples)
+    assert covers_house("Укренерго: обмеження по всій Україні",FULL)
