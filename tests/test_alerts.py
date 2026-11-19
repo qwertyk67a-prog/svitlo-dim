@@ -88,11 +88,52 @@ def test_gav_is_not_confused_with_gpv():
         "Дніпропетровщина: графіки погодинних відключень діють")) is None
 
 
-def test_first_feed_run_is_silent_and_seeds_latest():
+def test_old_emergency_on_first_run_is_silent_and_seeds_latest():
     state={}
-    page=html_page([fake_post(10,"Дніпропетровщина: запроваджені екстрені відключення")])
+    page=html_page([fake_post(
+        10,"Дніпропетровщина: запроваджені екстрені відключення",
+        NOW-timedelta(hours=7),
+    )])
     assert region_candidates(page,state,NOW)==[]
     assert state["official:last_id"]==10
+
+
+def test_first_run_recent_active_emergency_notified_once():
+    state={}
+    page=html_page([fake_post(
+        10,"Дніпропетровщина: запроваджені екстрені відключення",
+        NOW-timedelta(minutes=15),
+    )])
+    results=region_candidates(page,state,NOW)
+    sends=[x for x in results if x[3]]
+    assert len(sends)==1
+    assert sends[0][2]=="active"
+    assert "Офіційне повідомлення опубліковано" in sends[0][3]
+    assert "не підтвердження відключення конкретного будинку" in sends[0][3]
+    assert "official:last_id" not in state
+    for _id,key,value,_message in results:state[key]=value
+    assert not [x for x in region_candidates(page,state,NOW) if x[3]]
+
+
+def test_first_run_recent_emergency_cancelled_does_not_claim_it_is_active():
+    state={}
+    page=html_page([
+        fake_post(10,"Дніпропетровщина: запроваджені екстрені відключення",
+                  NOW-timedelta(minutes=30)),
+        fake_post(11,"Дніпропетровщина: екстрені відключення скасовано",
+                  NOW-timedelta(minutes=5)),
+    ])
+    assert region_candidates(page,state,NOW)==[]
+    assert state["official:last_id"]==11
+
+
+def test_recent_active_region_not_confused_with_actual_building_outage():
+    event=regional_event(fake_post(
+        12,"Дніпропетровщина: запроваджені екстрені відключення",
+        NOW-timedelta(minutes=4),
+    ))
+    from alerts import regional_message
+    assert "не підтвердження відключення конкретного будинку" in regional_message(event)
 
 
 def test_new_status_once_and_repeated_status_silent():
@@ -238,3 +279,33 @@ def test_reason_wording_only_does_not_alert_again():
         state[key]=value
     follow=address_decision(b,state,NOW)
     assert not [item for item in follow if item[3]]
+
+
+def test_address_outage_discovered_after_started_time_explains_late_information():
+    item=house(reason="Аварійне відключення",kind="2",
+               start="08.11.2026 15:00",end="08.11.2026 21:00")
+    result=address_decision(item,{},NOW)
+    notice=next(x[3] for x in result if x[1]=="address:last_outage")
+    assert "час початку вже минув" in notice
+    assert "початися до отримання" in notice
+    assert "Інформацію виявлено" in notice
+    assert "не вимірює фактичну" in notice
+    assert "21:00" in notice
+    assert "Кропивницького" not in notice
+
+
+def test_future_address_outage_does_not_claim_it_already_started():
+    item=house(reason="Планові роботи",kind="1",
+               start="08.11.2026 18:00",end="08.11.2026 20:00")
+    result=address_decision(item,{},NOW)
+    notice=next(x[3] for x in result if x[1]=="address:last_outage")
+    assert "час початку вже минув" not in notice
+    assert "Зазначений початок: 08.11.2026 18:00" in notice
+
+
+def test_unknown_address_restoration_time_explicit():
+    item=house(reason="Аварійне відключення",kind="2",
+               start="08.11.2026 15:00")
+    result=address_decision(item,{},NOW)
+    notice=next(x[3] for x in result if x[1]=="address:last_outage")
+    assert "Орієнтовний час відновлення не зазначено" in notice
