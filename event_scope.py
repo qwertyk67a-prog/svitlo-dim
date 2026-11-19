@@ -175,14 +175,20 @@ def coverage_for_house(announcement, scope):
                 for k in ("city", "street", "house"))):
         return None
     text = _clean(announcement)
-    if not text or _exclusion_might_include_house(text, scope):
+    if not text or _exclusion_might_include_house(affected, scope):
         return None
 
-    if _exact_house(text, scope):
+    # Excluded places are not part of the affected geography.
+    # Otherwise "all of Kryvyi Rih except another district" is wrongly
+    # classified as an outage ONLY in that other district.
+    exemption = EXCEPTION.search(text)
+    affected = text[:exemption.start()].strip(" ,;:.") if exemption else text
+
+    if _exact_house(affected, scope):
         return {"level": "house", "partial": False, "label": "будинок"}
 
-    if _matching_street_without_other_house(text, scope):
-        return {"level": "street", "partial": _partial(text),
+    if _matching_street_without_other_house(affected, scope):
+        return {"level": "street", "partial": _partial(affected),
                 "label": "вулиця будинку"}
 
     # If a report specifies ANOTHER address, the wider city header does not
@@ -191,9 +197,9 @@ def coverage_for_house(announcement, scope):
         return None
 
     # Explicit narrower locality beats the broader regional headline.
-    districts = DISTRICT_NAME.findall(text)
+    districts = DISTRICT_NAME.findall(affected)
     if districts:
-        if not any(city in text for city in CITY_NAMES):
+        if not any(city in affected for city in CITY_NAMES):
             return None  # Same-named districts can exist in different cities.
         if any(_district_matches(word, scope.get("district", ""))
                for word in districts):
@@ -203,9 +209,9 @@ def coverage_for_house(announcement, scope):
             }
         return None
 
-    quarters = QUARTER_NAME.findall(text)
+    quarters = QUARTER_NAME.findall(affected)
     if quarters:
-        if not any(city in text for city in CITY_NAMES):
+        if not any(city in affected for city in CITY_NAMES):
             return None
         if any(_quarter_matches(number, scope.get("quarter", ""))
                for number in quarters):
@@ -215,29 +221,29 @@ def coverage_for_house(announcement, scope):
             }
         return None
 
-    if OTHER_CITY.search(text) and not any(name in text for name in CITY_NAMES):
+    if OTHER_CITY.search(affected) and not any(name in affected for name in CITY_NAMES):
         return None
-    if OTHER_REGION.search(text) and not (
-        "дніпропетровськ" in text or any(name in text for name in REGION_NAMES)
+    if OTHER_REGION.search(affected) and not (
+        "дніпропетровськ" in affected or any(name in affected for name in REGION_NAMES)
     ):
         return None
 
     if not _known_city(scope):
         return None
 
-    if any(name in text for name in CITY_NAMES):
-        return {"level": "city", "partial": _partial(text),
+    if any(name in affected for name in CITY_NAMES):
+        return {"level": "city", "partial": _partial(affected),
                 "label": "Кривий Ріг"}
 
-    if "дніпропетровськ" in text or any(
-        name in text for name in REGION_NAMES
+    if "дніпропетровськ" in affected or any(
+        name in affected for name in REGION_NAMES
     ):
-        return {"level": "region", "partial": _partial(text),
+        return {"level": "region", "partial": _partial(affected),
                 "label": "Дніпропетровська область"}
 
     if re.search(
         r"\b(?:україн\w*|усіх\s+област\w*|всіх\s+област\w*)\b",
-        text,
+        affected,
     ):
         # "В окремих областях України" does not establish that this
         # particular oblast is affected. A nationwide announcement does.
@@ -245,17 +251,17 @@ def coverage_for_house(announcement, scope):
             r"(?:по|на|у|в)\s+(?:всій|усій|цілій)\s+україн\w*|"
             r"(?:всіх|усіх)\s+област\w*|"
             r"(?:всій|усій)\s+територі\w*\s+україн\w*|"
-            r"україн\w*\s+повністю", text,
+            r"україн\w*\s+повністю", affected,
         ))
         unspecified_subset = bool(re.search(
             r"(?:деяк\w*|окрем\w*|кільк\w*|певн\w*|частин\w*)\s+"
             r"(?:област\w*|регіон\w*|міст\w*)|"
             r"(?:частин\w*|деяк\w*\s+територі\w*)\s+україн\w*",
-            text,
+            affected,
         ))
         if unspecified_subset and not nationwide:
             return None
-        return {"level": "country", "partial": _partial(text),
+        return {"level": "country", "partial": _partial(affected),
                 "label": "Україна"}
 
     return None
