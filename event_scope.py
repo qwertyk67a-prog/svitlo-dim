@@ -226,6 +226,27 @@ def coverage_for_house(announcement, scope):
             }
         return None
 
+    # A region-wide heading may describe an incident only in named OTHER
+    # cities or a non-exhaustive subset of communities. Neither proves that
+    # our Kryvyi Rih house is in the affected subset.
+    if re.search(
+        r"\b(?:лише|тільки|виключно)\s+(?:у|в|на)\s+"
+        r"(?:деяк\w*|окрем\w*|кільк\w*|певн\w*)?\s*"
+        r"(?:міст\w*|громад\w*|район\w*|населен\w*\s+пункт\w*)\b",
+        affected,
+    ):
+        return None
+    if re.search(
+        r"\b(?:у|в|на)\s+(?:деяк\w*|окрем\w*|кільк\w*|певн\w*)\s+"
+        r"(?:міст\w*|громад\w*|район\w*|населен\w*\s+пункт\w*)\b",
+        affected,
+    ):
+        return None
+    if re.search(r"\b(?:у|в)\s+(?:місті|м\.)\s*[а-яіїєґ]", affected) and not any(
+        city in affected for city in CITY_NAMES
+    ):
+        return None
+
     if OTHER_CITY.search(affected) and not any(name in affected for name in CITY_NAMES):
         return None
     if OTHER_REGION.search(affected) and not (
