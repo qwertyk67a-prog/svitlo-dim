@@ -18,7 +18,7 @@ def main():
     if not isinstance(me, dict) or not me.get("is_bot"):
         raise SetupError("Токен не належить Telegram-боту")
     username = me.get("username") or ""
-    print("Telegram bot: @" + username)
+    print("Telegram bot verified; username withheld from public logs")
     webhook = call_telegram(token, "getWebhookInfo")
     if not isinstance(webhook, dict):
         raise SetupError("Webhook status недоступний")
