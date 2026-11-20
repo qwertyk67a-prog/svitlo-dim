@@ -424,32 +424,66 @@ def _queue_tokens():
     }
 
 
-def _anonymize_state(serialized):
-    for group, opaque in sorted(
-        _queue_tokens().items(), key=lambda item: -len(item[0])
-    ):
-        serialized = serialized.replace(group, opaque)
-    return serialized
+def _map_state_key(key, mapping):
+    """Change only queue components of known checkpoint keys."""
+    if not isinstance(key, str):
+        return key
+    parts = key.split(":")
+    if (len(parts) >= 3 and parts[0] in ("week", "reminder")
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1])):
+        index = 2
+    elif len(parts) >= 2 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[0]):
+        index = 1
+    else:
+        return key
+    if parts[index] not in mapping:
+        return key
+    parts[index] = mapping[parts[index]]
+    return ":".join(parts)
+
+
+def _map_state_values(value, mapping):
+    """Never replace short queue names inside dates, hashes or arbitrary text."""
+    if isinstance(value, dict):
+        return {
+            _map_state_key(key, mapping): _map_state_values(item, mapping)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_map_state_values(item, mapping) for item in value]
+    if isinstance(value, tuple):
+        return [_map_state_values(item, mapping) for item in value]
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    return value
+
+
+def _anonymize_state(key):
+    return _map_state_key(key, _queue_tokens())
 
 
 def _restore_state(serialized):
-    for group, opaque in _queue_tokens().items():
-        serialized = serialized.replace(opaque, group)
-    return serialized
+    """Compatibility helper for tests that supply a serialized checkpoint."""
+    reverse = {token: group for group, token in _queue_tokens().items()}
+    data = json.loads(serialized)
+    return json.dumps(_map_state_values(data, reverse), ensure_ascii=False)
 
 
 def state_read(path):
     if not path.exists():
         return {}
-    return json.loads(_restore_state(path.read_text(encoding="utf-8")))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    reverse = {token: group for group, token in _queue_tokens().items()}
+    return _map_state_values(data, reverse)
 
 
 def state_write(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
-    temp.write_text(_anonymize_state(json.dumps(
-        data, ensure_ascii=False, sort_keys=True, indent=2,
-    )), encoding="utf-8")
+    public = _map_state_values(data, _queue_tokens())
+    temp.write_text(json.dumps(
+        public, ensure_ascii=False, sort_keys=True, indent=2,
+    ), encoding="utf-8")
     temp.replace(path)
 
 
