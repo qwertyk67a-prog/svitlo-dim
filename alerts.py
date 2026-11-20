@@ -130,6 +130,7 @@ def regional_event(post):
 
 
 def regional_message(event, changed=False):
+    op = html.escape(operator_label())
     kind = event["kind"]
     active = event["status"] == "active"
     area = event["area"]
@@ -144,16 +145,16 @@ def regional_message(event, changed=False):
         body = ("Погодинний графік може бути неактуальним." if active else
                 "Оновлення стосується аварійного режиму, а не гарантії наявності світла.")
     else:
-        title = ("⚠️ <b>оператор повідомив про знеструмлення</b>" if active else
-                 "✅ <b>оператор повідомив про відновлення електропостачання на території</b>")
+        title = (f"⚠️ <b>{op} повідомив про знеструмлення</b>" if active else
+                 f"✅ <b>{op} повідомив про відновлення електропостачання на території</b>")
         body = ("Відключення можуть відбуватися поза погодинним графіком." if active else
                 "Це повідомлення про територію, а не підтвердження відновлення у будинку.")
 
     if changed == "publication" and active:
-        title = "🔄 <b>оператор змінив офіційне повідомлення</b>"
+        title = f"🔄 <b>{op} змінив офіційне повідомлення</b>"
         body = "Змінено текст першоджерела. Час відключення міг залишитися незмінним."
     elif changed and active:
-        title = "🔄 <b>оператор уточнив строки відключення</b>"
+        title = f"🔄 <b>{op} уточнив строки відключення</b>"
         body = "Офіційні дані про час події оновлено."
     coverage = event.get("coverage") or {}
     label = html.escape(coverage.get("label") or area)
@@ -161,11 +162,11 @@ def regional_message(event, changed=False):
         f"Зазначена територія: {label}. "
         "Будинок розташований у цій території."
         if coverage.get("level") != "house" else
-        "оператор прямо зазначив цей будинок."
+        f"{op} прямо зазначив цей будинок."
     )
     if not active:
         uncertainty = (
-            "За повідомленням оператор, попередній режим для території завершено. "
+            f"За повідомленням {op}, попередній режим для території завершено. "
             "Це не підтверджує наявність електроенергії у кожному будинку."
         )
     elif coverage.get("level") == "house":
@@ -175,7 +176,7 @@ def regional_message(event, changed=False):
         )
     elif coverage.get("partial"):
         uncertainty = (
-            "оператор повідомляє про часткове знеструмлення на території. "
+            f"{op} повідомляє про часткове знеструмлення на території. "
             "Невідомо, чи зачепило відключення конкретний будинок."
         )
     else:
@@ -250,14 +251,12 @@ def event_record(event, now):
         "post_id": post["id"],
         "content_hash": event.get("content_hash"),
         "revision": fingerprint(revision),
-        "operator": "оператор",
-        "source": post["url"],
+        "source": hashlib.sha256(post["url"].encode("utf-8")).hexdigest()[:20],
         "published": post["date"].isoformat(),
         "detected": now.isoformat(),
         "start": start.isoformat() if start else None,
         "end": finish.isoformat() if finish else None,
-        "area": event["area"],
-    }
+     }
 
 
 def region_candidates(page, state, now, scope=None):
@@ -270,7 +269,7 @@ def region_candidates(page, state, now, scope=None):
     """
     posts = official_posts(page)
     if not posts:
-        raise RuntimeError("Не вдалося прочитати офіційний канал оператор")
+        raise RuntimeError("Офіційний канал недоступний")
     from event_scope import coverage_for_house
 
     old_id = state.get("official:last_id")
@@ -430,12 +429,12 @@ def address_fields(secret):
     try:
         raw = json.loads(secret)
     except (ValueError, TypeError):
-        raise RuntimeError("Некоректний формат provider_ADDRESS_JSON")
+        raise RuntimeError("Некоректний формат POWER_CONFIG_JSON")
     if not isinstance(raw, dict):
-        raise RuntimeError("provider_ADDRESS_JSON повинен містити об'єкт")
+        raise RuntimeError("POWER_CONFIG_JSON повинен містити об'єкт")
     fields = [raw.get(k) for k in ("city", "street", "house")]
     if any(not isinstance(v, str) or not v.strip() or len(v) > 160 for v in fields):
-        raise RuntimeError("provider_ADDRESS_JSON: обов'язкові поля city/street/house")
+        raise RuntimeError("POWER_CONFIG_JSON: обов'язкові поля city/street/house")
     return fields
 
 
@@ -457,7 +456,7 @@ def get_house_entry(response, house):
         ]
         if len(alternatives) == 1:
             LOG.warning(
-                "Адресний довідник оператор: знайдено один варіант написання "
+                "Адресний довідник постачальника: знайдено один варіант написання "
                 "номера з роздільником перед літерою; перевірте адресу "
                 "на офіційному сайті."
             )
@@ -471,11 +470,11 @@ def get_house_entry(response, house):
             rough(key) == rough(house) for key in response.houses
         )
         LOG.warning(
-            "Адресний довідник оператор: записів=%d, точних збігів=%d, "
+            "Адресний довідник постачальника: записів=%d, точних збігів=%d, "
             "лише приблизних збігів=%d",
             len(response.houses), len(matches), similar_count,
         )
-        raise RuntimeError("Будинок не знайдено однозначно в оператор")
+        raise RuntimeError("Адресу не знайдено однозначно в довіднику")
     entry = matches[0][1]
     # An empty record can mean none; but only in a successfully parsed response.
     return entry
@@ -527,10 +526,11 @@ def address_message(event, changed=False, now=None):
     The official address entry does not provide actual voltage telemetry.
     The detection time is NOT asserted to be the publication time.
     """
+    op = html.escape(operator_label())
     titles = {
         "repair": "🛠 <b>Планові ремонтні роботи</b>",
-        "fault": "‼️ <b>Аварійне відключення за даними оператор</b>",
-        "unclassified": "⚠️ <b>Повідомлення оператор про відключення</b>",
+        "fault": f"‼️ <b>Аварійне відключення за даними {op}</b>",
+        "unclassified": f"⚠️ <b>Повідомлення {op} про відключення</b>",
     }
     title = ("🔄 <b>Оновлено дані щодо відключення</b>" if changed
              else titles[event["category"]])
@@ -545,7 +545,7 @@ def address_message(event, changed=False, now=None):
                            start < now and (not finish or finish > now))
     if already_started:
         lines.append(
-            "⚠️ За даними оператор, зазначений час початку вже минув. "
+            f"⚠️ За даними {op}, зазначений час початку вже минув. "
             "Відключення могло початися до отримання цього повідомлення."
         )
     if event["start"]:
@@ -556,14 +556,14 @@ def address_message(event, changed=False, now=None):
     else:
         lines.append("Орієнтовний час відновлення не зазначено.")
     if event["category"] == "repair":
-        lines.append("Причина: планові роботи (за даними оператор).")
+        lines.append(f"Причина: планові роботи (за даними {op}).")
     elif event["category"] == "fault":
-        lines.append("Причина за оператор: аварійне відключення.")
+        lines.append(f"Причина за {op}: аварійне відключення.")
     if now:
         lines.append("Інформацію виявлено: " +
                      now.astimezone(KYIV).strftime("%d.%m.%Y %H:%M") + ".")
     lines.append("Бот не вимірює фактичну наявність електроенергії.")
-    lines.append(f'<a href="{official_site()}">Джерело: {html.escape(operator_label())}</a>')
+    lines.append(f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>')
     return "\n".join(lines)
 
 
@@ -577,7 +577,7 @@ def address_clear_message(old, now):
         "✅ <b>Інформацію про позаграфікове відключення знято</b>",
         "Раніше оголошене відключення більше не відображається за адресою.",
         "Це не підтверджує фактичну наявність світла.",
-        f'<a href="{official_site()}">Джерело: {html.escape(operator_label())}</a>',
+        f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
     ))
 
 
@@ -602,11 +602,11 @@ def address_decision(entry, state, now, expected=None):
             # provider explicitly revised the estimate to a time already past.
             # This is an early schedule correction, not voltage telemetry.
             message = "\n".join((
-                "🔄 <b>оператор уточнив орієнтовний час завершення</b>",
+                f"🔄 <b>{html.escape(operator_label())} уточнив орієнтовний час завершення</b>",
                 "Нове орієнтовне завершення: " + html.escape(event["end"]),
                 "Зазначений час уже минув.",
                 "Фактичне відновлення електроенергії в будинку не підтверджено.",
-                f'<a href="{official_site()}">Джерело: {html.escape(operator_label())}</a>',
+                f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
             ))
             result.append(("address", key, {
                 "status": "expired", "end": event["end"],
@@ -641,10 +641,10 @@ def address_decision(entry, state, now, expected=None):
     ):
         label = ", ".join(x.removeprefix("GPV") for x in current)
         text = (
-            "⚠️ <b>оператор змінив чергу за адресою</b>\n"
+            f"⚠️ <b>{html.escape(operator_label())} змінив чергу за адресою</b>\n"
             f"Наразі вказані черги: {html.escape(label or 'не визначено')}.\n"
             "Перевірте актуальність автоматичних повідомлень за цією адресою.\n"
-            f'<a href="{official_site()}">Джерело: {html.escape(operator_label())}</a>'
+            f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>'
         )
         result.append(("address", "address:groups", current, text))
     if previous is None:
