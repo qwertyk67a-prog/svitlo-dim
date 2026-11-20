@@ -277,3 +277,51 @@ def test_source_rate_limit_never_starts_browser_fallback(monkeypatch):
             provider_config(),{"method":"checkDisconUpdate"}
         ))
     assert invoked==[]
+
+
+
+def test_second_city_operator_channel_and_queue_are_private(monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from alerts import regional_event, official_posts
+    from event_scope import house_scope_from_secret, coverage_for_house
+    cfg=json.loads(json.dumps(TEST_CONFIG))
+    cfg.update({
+        "operator":"Нова мережа",
+        "city_label":"Світанкове",
+        "city_forms":["світанкове","світанковому"],
+        "region_label":"Друга область",
+        "region_forms":["друга область","другій області"],
+        "other_places":["іншоград"],
+        "other_regions":["сусідня область"],
+        "headline_prefixes":["нова мережа"],
+        "telegram_feed":"https://t.me/s/another_grid",
+        "queue_catalog":["Q-A","Q-B"],
+        "queue_display_prefix":"",
+        "address":{"city":"м. Світанкове","street":"вул. Тестова",
+                   "house":"27/Б","district":"","quarter":""},
+    })
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(cfg,ensure_ascii=False))
+    scope=house_scope_from_secret(address_json())
+    covered=coverage_for_house(
+        "Світанкове: запроваджено екстрені відключення",scope
+    )
+    assert covered and covered["level"]=="city"
+    assert coverage_for_house(
+        "Зелений Бір: запроваджено екстрені відключення",scope
+    ) is None
+    stamp=datetime.now(ZoneInfo("Europe/Kyiv"))
+    page=(
+        '<div class="tgme_widget_message" data-post="another_grid/14">'
+        '<div class="tgme_widget_message_text">'
+        'Світанкове: запроваджено екстрені відключення</div>'
+        f'<time datetime="{stamp.isoformat()}"></time></div>'
+    )
+    posts=official_posts(page)
+    assert len(posts)==1
+    event=regional_event(posts[0])
+    assert event and event["operator"]=="Нова мережа"
+    assert event["area"]=="Світанкове"
+    assert posts[0]["url"].endswith("another_grid/14")
+    from house_reliability import verified_house_queues
+    assert verified_house_queues(["Q-B"])==("Q-B",)
