@@ -1,5 +1,8 @@
 """Integration tests: one house, one recipient, persistent on-disk state."""
 import asyncio
+import hashlib
+import hmac
+import os
 import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -37,6 +40,16 @@ def setup(monkeypatch,path):
     async def default_home(_private_address):
         return address_entry(["GPV6.2"])
     monkeypatch.setattr(alerts, "fetch_address_status", default_home)
+
+
+def seed_state(path, content):
+    identity = hmac.new(
+        os.environ.get("TELEGRAM_BOT_TOKEN", "").encode("utf-8"),
+        os.environ["POWER_CONFIG_JSON"].encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    path.write_text(json.dumps({"config:namespace": identity, **content}),
+                    encoding="utf-8")
 
 
 def test_successful_notification_persisted_when_next_one_fails(tmp_path,monkeypatch):
@@ -142,10 +155,10 @@ def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeyp
     setup(monkeypatch, state_file)
     current = setup_address(monkeypatch)
     current["queues"] = ["GPV5.1"]
-    state_file.write_text(json.dumps({
+    seed_state(state_file, {
         "house:groups": ["GPV5.1", "GPV6.2"],
         "2026-01-01:GPV6.2": {"status":"outages","digest":"old"},
-    }), encoding="utf-8")
+    })
 
     async def load(group_ids):
         return fake_schedule(group="GPV5.1", days=1)
@@ -187,8 +200,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
     setup(monkeypatch,state_file)
     current=setup_address(monkeypatch)
     current["queues"]=["GPV5.1"]
-    state_file.write_text(json.dumps({"house:groups":["GPV6.2"]}),
-                          encoding="utf-8")
+    seed_state(state_file, {"house:groups":["GPV6.2"]})
     calls=[]
     async def load(groups):
         return fake_schedule(group="GPV5.1",days=1)
@@ -216,11 +228,11 @@ def test_migrating_old_queue_hold_does_not_pause_anymore(tmp_path,monkeypatch):
     setup(monkeypatch,state_file)
     current=setup_address(monkeypatch)
     current["queues"]=["GPV5.1","GPV6.2"]
-    state_file.write_text(json.dumps({
+    seed_state(state_file, {
         "house:queue_hold": {
             "groups":["GPV5.1"], "notified":True,"code":"old-code"
         }
-    }),encoding="utf-8")
+    })
     async def load(groups):
         return fake_schedule(group="GPV6.2",days=1)
     monkeypatch.setattr(bot,"get_schedule",load)
@@ -350,7 +362,7 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     async def unavailable(_secret):
         raise RuntimeError("provider temporary error")
     monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
-    state_file.write_text(json.dumps({"house:groups": ["GPV6.2"]}), encoding="utf-8")
+    seed_state(state_file, {"house:groups": ["GPV6.2"]})
     checked = []
     async def schedules(groups):
         checked.append(groups)
@@ -430,9 +442,9 @@ def test_dry_run_does_not_change_existing_state(tmp_path, monkeypatch):
 def test_active_emergency_marks_daily_schedule_as_conditional(tmp_path,monkeypatch):
     state_file = tmp_path / "state.json"
     setup(monkeypatch,state_file)
-    state_file.write_text(json.dumps({
+    seed_state(state_file, {
         "official:status:emergency:region":{"status":"active"},
-    }), encoding="utf-8")
+    })
     async def load(*_groups):
         return fake_schedule(days=1)
     monkeypatch.setattr(bot,"get_schedule",load)
