@@ -58,7 +58,7 @@ Scope: reusable branch, not the currently active default branch.
 
 ## Automated verification
 
-GitHub Actions Python suite passed: **182 tests** on this branch.
+GitHub Actions Python suite passed: **188 tests** on this branch.
 Includes mock CSRF sequences, invalid configs, synthetic multi-city switches,
 queue changes, regional name-boundary matching, initial deployments,
 retry/deduplication, and public
@@ -80,3 +80,12 @@ Keep the currently working installation running in the meantime.
 ## Namespace stability
 
 The installation checkpoint now uses canonicalized operational identity, not raw JSON bytes. Whitespace and JSON key ordering do not reset notification history. Different properties, Telegram destinations or bot credentials remain independent. This needs a first-run checkpoint migration when enabling the new configuration.
+
+## Final audit update
+
+- Static review checked 36 current public text files: no old fixed operator, city, house, district, quarter or queue identifier matched.
+- Canonicalized checkpoint namespaces preserve sent-message history across JSON whitespace and key-order changes.
+- Changing the property, Telegram token or destination creates a distinct checkpoint namespace.
+- A 64-character hex state key is required. Syntax validation cannot prove randomness; use a cryptographically secure generator.
+- GitHub Actions unit run 44766285064 passed 188 tests before the documentation-only release checklist was added.
+- A live acceptance run with the new POWER_CONFIG_JSON is still required before merging to the active main branch.

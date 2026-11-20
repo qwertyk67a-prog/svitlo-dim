@@ -98,3 +98,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ~~~
 
 Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Never copy an example key. The format validator cannot prove that an accepted key is truly random.
+
+## Before deploying this version
+
+See [Safe deployment checklist](docs/release-checklist.md). The new POWER_CONFIG_JSON secret must be installed, then the feature-branch address check and dry-run must both succeed. Do not merge solely on unit tests. The current active main-branch bot remains unchanged until the release checks pass.
