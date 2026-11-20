@@ -100,8 +100,8 @@ def test_no_private_provider_data_in_live_source_tree():
     ]
     for path in production:
         text=(root/path).read_text(encoding="utf-8").casefold()
-        assert "кривий ріг" not in text
-        assert "дніпропетровщина" not in text
+        assert TEST_CONFIG["operator"].casefold() not in text
+        assert TEST_CONFIG["address"]["street"].casefold() not in text
         assert "configured-company.example" not in text
         assert "t.me/s/specificoperator" not in text
         assert "branded_client" not in text
