@@ -96,7 +96,7 @@ def main():
         raise SetupError("Чат не є Telegram-групою")
     call_telegram(
         token, "sendMessage", chat_id=chat_id, disable_notification="true",
-        text=("✅ Тестове повідомлення SVITLO-DIM.\n"
+        text=("✅ Тестове повідомлення бота відключень.\n"
               "З'єднання з Telegram працює. Моніторинг ще не активований."),
     )
     print("Одне тестове повідомлення надіслано. Моніторинг не активований.")
