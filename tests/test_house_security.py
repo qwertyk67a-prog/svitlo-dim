@@ -183,6 +183,6 @@ def test_no_production_hardcoded_queue_or_private_district():
     assert f"GPV{3}.{1}" not in example
     assert "TEST_QUEUE:" not in live and "TEST_QUEUE:" not in preview
     assert "129" not in verifier
-    assert "покровськ" not in verifier
+    assert "вул. умовна" not in verifier.casefold()
     assert "POWER_CONFIG_JSON" in live and "POWER_CONFIG_JSON" in preview
     assert "get_schedule(house_groups)" in core
