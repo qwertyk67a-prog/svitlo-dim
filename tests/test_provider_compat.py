@@ -106,3 +106,54 @@ def test_no_private_provider_data_in_live_source_tree():
         assert "t.me/s/specificoperator" not in text
         assert "branded_client" not in text
         assert "branded-blackout-client" not in text
+
+
+
+def test_public_checkpoint_hides_actual_queue_and_preserves_dedup(tmp_path):
+    from bot import state_write, state_read
+    path=tmp_path/"bot_state.json"
+    state={
+        "config:namespace": "fixed-synthetic-hash",
+        "house:groups": ["GPV3.1"],
+        "week:2026-11-16:GPV3.1": {"digest":"abcdef","status":"outages"},
+        "2026-11-20:GPV3.1": {"digest":"1234","status":"outages"},
+        "official:last_id": 99,
+    }
+    state_write(path,state)
+    on_disk=path.read_text(encoding="utf-8")
+    assert "GPV3.1" not in on_disk
+    assert "3.1" not in on_disk
+    assert "GPV" not in on_disk
+    assert "fixed-synthetic-hash" in on_disk
+    assert state_read(path)==state
+
+
+def test_new_private_state_key_produces_different_anonymous_ids(tmp_path,monkeypatch):
+    from bot import state_write, state_read
+    path=tmp_path/"state.json"
+    state={"house:groups":["GPV3.1"]}
+    state_write(path,state)
+    before=path.read_text(encoding="utf-8")
+    changed=json.loads(json.dumps(TEST_CONFIG))
+    changed["state_key"]="a completely different 32-plus character test key"
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(changed,ensure_ascii=False))
+    # The old public pseudonym cannot be mistaken for a new queue.
+    assert state_read(path)!=state
+    state_write(path,state)
+    after=path.read_text(encoding="utf-8")
+    assert before!=after
+    assert state_read(path)==state
+
+
+def test_no_real_names_or_secret_fields_in_public_checkpoint(tmp_path):
+    from bot import state_write
+    path=tmp_path/"state.json"
+    state_write(path,{
+        "house:groups":["GPV3.1"],
+        "official:event:10":{"status":"active","source":"a2a2a2"},
+    })
+    visible=path.read_text(encoding="utf-8")
+    assert TEST_CONFIG["address"]["city"] not in visible
+    assert TEST_CONFIG["address"]["street"] not in visible
+    assert TEST_CONFIG["operator"] not in visible
+    assert TEST_CONFIG["site_url"] not in visible
