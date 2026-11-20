@@ -157,3 +157,24 @@ def test_no_real_names_or_secret_fields_in_public_checkpoint(tmp_path):
     assert TEST_CONFIG["address"]["street"] not in visible
     assert TEST_CONFIG["operator"] not in visible
     assert TEST_CONFIG["site_url"] not in visible
+
+
+
+def test_provider_specific_queue_catalog_and_overlapping_identifiers(tmp_path,monkeypatch):
+    from bot import state_write, state_read
+    from house_reliability import verified_house_queues, queue_label
+    config=json.loads(json.dumps(TEST_CONFIG))
+    config["queue_catalog"]=["GROUP1","GROUP10"]
+    config["queue_display_prefix"]="GROUP"
+    monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config,ensure_ascii=False))
+    assert verified_house_queues(["GROUP10","GROUP1"])==("GROUP1","GROUP10")
+    assert queue_label("GROUP10")=="10"
+    with pytest.raises(ValueError):
+        verified_house_queues(["NONEXISTENT"])
+    path=tmp_path/"state.json"
+    state={"house:groups":["GROUP10","GROUP1"],
+           "week:2026-11-16:GROUP10":{"digest":"abc","status":"outages"}}
+    state_write(path,state)
+    raw=path.read_text(encoding="utf-8")
+    assert "GROUP1" not in raw and "GROUP10" not in raw
+    assert state_read(path)==state
