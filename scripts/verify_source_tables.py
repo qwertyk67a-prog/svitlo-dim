@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from bot import get_schedule, parse_verified, clock
+from bot import get_schedule, parse_verified, clock, _queue_tokens
 from alerts import fetch_address_status
 from power_config import address_json
 
@@ -45,7 +45,7 @@ async def main():
             preset = parse_verified(weekday.slots, labels) if weekday else None
         print("SOURCE_COMPARISON:")
         print(json.dumps({
-            "queue": queue, "target_date": day.isoformat(),
+            "queue_ref": _queue_tokens()[queue], "target_date": day.isoformat(),
             "daily_fact_updated_at": str(getattr(source.fact, "update", None)),
             "daily_fact": as_data(daily),
             "weekly_preset_active": bool(source.preset.is_active),
