@@ -1,7 +1,7 @@
 """Reliability guards for ONE configured house and ONE Telegram destination.
 
 No address or Telegram credentials are kept in this module.
-Daily confirmations come only from a fully parsed DTEK fact table.
+Daily confirmations come only from a fully parsed provider fact table.
 GitHub Actions cannot guarantee a five-minute warning deadline.
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
+from power_config import official_site, operator_label
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ALLOWED = (5, 15, 30, 60)
@@ -78,15 +79,15 @@ def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
 
 
 def verified_house_queues(raw) -> tuple[str, ...]:
-    """Accept only explicit, recognized DTEK queue identifiers.
+    """Accept only explicit, recognized provider queue identifiers.
 
     Empty/malformed data never imply an actual queue removal.
     """
     if not isinstance(raw, (list, tuple, set)) or not raw:
-        raise ValueError("ДТЕК не підтвердив черги будинку")
+        raise ValueError("Оператор не підтвердив черги будинку")
     if any(not isinstance(group, str) or
            not re.fullmatch(r"GPV[1-6]\.[12]", group) for group in raw):
-        raise ValueError("ДТЕК повернув непідтверджену чергу")
+        raise ValueError("Оператор повернув непідтверджену чергу")
     return tuple(sorted(set(raw)))
 
 
@@ -116,7 +117,7 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     if not added and not removed:
         return list(current), None
 
-    title = ("🔄 <b>ДТЕК оновив черги будинку</b>" if has_previous
+    title = ("🔄 <b>Оператор оновив черги будинку</b>" if has_previous
              else "⚡️ <b>Уточнено черги будинку</b>")
     lines = [title]
     if added:
@@ -131,7 +132,7 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
             html.escape(x.removeprefix("GPV")) for x in current),
         "✅ Бот продовжує надсилати графіки всіх черг за цією адресою.",
         "Відключення можуть відрізнятися для частин будинку.",
-        '<a href="https://www.dtek-dnem.com.ua/ua/shutdowns">Джерело: ДТЕК</a>',
+        f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
     ))
     return list(current), "\n".join(lines)
 

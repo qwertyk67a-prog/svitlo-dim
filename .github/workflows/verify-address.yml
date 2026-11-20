@@ -1,4 +1,4 @@
-name: Verify DTEK house address (no Telegram)
+name: Verify configured address (no Telegram)
 on:
   workflow_dispatch:
 permissions:
@@ -19,6 +19,5 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - name: Check queues without posting messages
         env:
-          DTEK_ADDRESS_JSON: ${{ secrets.DTEK_ADDRESS_JSON }}
-          DTEK_WAF_BROWSER: "1"
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
         run: python -m scripts.verify_address
