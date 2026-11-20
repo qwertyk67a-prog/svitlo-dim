@@ -42,7 +42,7 @@ def html_page(posts):
     return "<html><body>"+"".join(nodes)+"</body></html>"
 
 
-def house(reason="",kind="",start="",end="",groups=("GPV6.2",)):
+def house(reason="",kind="",start="",end="",groups=("GPV3.1",)):
     return SimpleNamespace(
         sub_type=reason,outage_type=kind,start_date=start,end_date=end,
         group_ids=list(groups),
@@ -249,13 +249,13 @@ def test_early_clear_vs_natural_end():
     msg=address_clear_message(old["event"],NOW)
     assert msg and "не відображається" in msg
     assert address_clear_message(old["event"],NOW+timedelta(hours=5)) is None
-    state={"address:last_outage":old,"address:groups":["GPV6.2"]}
+    state={"address:last_outage":old,"address:groups":["GPV3.1"]}
     changes=address_decision(house(),state,NOW)
     assert not [r for r in changes if r[3]]  # missing API data is not an official cancellation
 
 
 def test_change_of_house_group_only_after_baseline():
-    state={"address:groups":["GPV6.2"]}
+    state={"address:groups":["GPV3.1"]}
     result=address_decision(house(groups=["GPV5.1"]),state,NOW)
     assert any("змінив чергу" in x[3] for x in result if x[3])
     assert all("Умовна_вулиця" not in x[3] for x in result if x[3])
@@ -327,7 +327,7 @@ def test_unknown_address_restoration_time_explicit():
 
 
 
-def test_actual_dtek_alternate_clock_first_format_detected_correctly():
+def test_actual_provider_alternate_clock_first_format_detected_correctly():
     assert parse_provider_date("15:00 08.11.2026")==parse_provider_date("08.11.2026 15:00")
     item=house(reason="Аварійні роботи",kind="2",
                start="15:00 08.11.2026",end="21:00 08.11.2026")
@@ -368,7 +368,7 @@ def test_emergency_elsewhere_is_ignored_even_when_entire_area():
     assert not [r for r in rows if r[3]]
 
 
-def test_late_dtek_announcement_recovered_at_next_check():
+def test_late_provider_announcement_recovered_at_next_check():
     state={"official:last_id":10}
     post=html_page([fake_post(11,
         "Прикладщина: запроваджено екстрені відключення "
@@ -701,7 +701,7 @@ def test_private_house_lookup_failure_logs_only_counts(caplog):
 
 def test_letter_suffix_separator_is_a_unique_alias_only():
     from alerts import get_house_entry
-    record = house(groups=("GPV6.2",))
+    record = house(groups=("GPV3.1",))
     response = SimpleNamespace(houses={"42/А": record})
     assert get_house_entry(response, "42А") is record
     assert get_house_entry(response, "42-А") is record

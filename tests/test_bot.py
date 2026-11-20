@@ -15,7 +15,7 @@ from bot import (
 KYIV = ZoneInfo("Europe/Kyiv")
 TODAY = date(2026, 11, 8)
 TOMORROW = TODAY + timedelta(days=1)
-GROUP = "GPV6.2"
+GROUP = "GPV3.1"
 LABELS = {"1": "00-01", "2": "01-02", "3": "02-03"}
 CLEAR = {"1": "yes", "2": "yes", "3": "yes"}
 
@@ -69,7 +69,7 @@ def test_hourly_and_minute_slots():
         raise AssertionError("Invalid slot accepted")
 
 
-def test_dtek_slot_parsing_and_lengths():
+def test_provider_slot_parsing_and_lengths():
     spans, unknown = intervals(
         {"1": "first", "2": "second", "3": "maybe"}, LABELS)
     assert spans == [(0, 30, "off"), (90, 120, "off"), (120, 180, "maybe")]
@@ -216,7 +216,7 @@ def test_all_telegram_templates_are_ukrainian():
         assert expected in t
         assert "1 год 30 хв" in t
         assert "30 хв" in t
-        assert "Черга 6.2" in t
+        assert "Черга 3.1" in t
         assert "Джерело: ПрикладЕнерго" in t
     c = cancellation_message(TODAY, GROUP)
     assert "Планові відключення скасовано" in c
@@ -232,7 +232,7 @@ def test_all_telegram_templates_are_ukrainian():
 
 def test_no_personal_address_in_bot_source():
     source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
-    assert 'os.getenv("TEST_QUEUE", "6.2")' not in source
+    assert 'os.getenv("TEST_QUEUE", "3.1")' not in source
     assert "address_json()" in source
     assert "get_home_num(" not in source
 

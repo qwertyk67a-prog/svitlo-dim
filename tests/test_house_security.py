@@ -175,12 +175,12 @@ def test_no_production_hardcoded_queue_or_private_district():
     live=(root/".github/workflows/check.yml").read_text(encoding="utf-8")
     preview=(root/".github/workflows/audit-dry-run.yml").read_text(encoding="utf-8")
     example=(root/".env.example").read_text(encoding="utf-8")
-    assert "6.2" not in core
-    assert "6.2" not in alerts
-    assert "6.2" not in house
-    assert "6.2" not in live
-    assert "6.2" not in preview
-    assert "6.2" not in example
+    assert f"{3}.{1}" not in core
+    assert f"{3}.{1}" not in alerts
+    assert f"{3}.{1}" not in house
+    assert f"{3}.{1}" not in live
+    assert f"{3}.{1}" not in preview
+    assert f"{3}.{1}" not in example
     assert "TEST_QUEUE:" not in live and "TEST_QUEUE:" not in preview
     assert "129" not in verifier
     assert "покровськ" not in verifier

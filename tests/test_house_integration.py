@@ -15,7 +15,7 @@ from conftest import TEST_CONFIG
 KYIV=ZoneInfo("Europe/Kyiv")
 
 
-def fake_schedule(group="GPV6.2", days=2, has_week=False):
+def fake_schedule(group="GPV3.1", days=2, has_week=False):
     today=datetime.now(KYIV).date()
     raw={}
     for i in range(days):
@@ -38,7 +38,7 @@ def setup(monkeypatch,path):
     monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(TEST_CONFIG, ensure_ascii=False))
     import alerts
     async def default_home(_private_address):
-        return address_entry(["GPV6.2"])
+        return address_entry(["GPV3.1"])
     monkeypatch.setattr(alerts, "fetch_address_status", default_home)
 
 
@@ -68,8 +68,8 @@ def test_successful_notification_persisted_when_next_one_fails(tmp_path,monkeypa
         asyncio.run(bot.once())
     stored=bot.state_read(state_file)
     day=datetime.now(KYIV).date()
-    assert f"{day.isoformat()}:GPV6.2" in stored
-    assert f"{(day+timedelta(days=1)).isoformat()}:GPV6.2" not in stored
+    assert f"{day.isoformat()}:GPV3.1" in stored
+    assert f"{(day+timedelta(days=1)).isoformat()}:GPV3.1" not in stored
     assert len(calls)==2
 
 
@@ -96,7 +96,7 @@ def address_entry(groups):
 
 def setup_address(monkeypatch):
     import alerts
-    current = {"queues": ["GPV6.2"]}
+    current = {"queues": ["GPV3.1"]}
 
     async def lookup(_secret):
         return address_entry(current["queues"])
@@ -109,7 +109,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     setup(monkeypatch, state_file)
     current = setup_address(monkeypatch)
-    current["queues"] = ["GPV6.2", "GPV5.1"]
+    current["queues"] = ["GPV3.1", "GPV5.1"]
     requested = []
 
     async def load(group_ids):
@@ -121,7 +121,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
                                    is_active=False, groups={}),
             fact=SimpleNamespace(
                 days={stamp: {
-                    "GPV6.2": {"1":"no", "2":"yes"},
+                    "GPV3.1": {"1":"no", "2":"yes"},
                     "GPV5.1": {"1":"yes", "2":"no"},
                 }},
                 update="12.11.2026 21:00"
@@ -137,13 +137,13 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     )
 
     asyncio.run(bot.once())
-    assert requested == [("GPV5.1", "GPV6.2")]
+    assert requested == [("GPV5.1", "GPV3.1")]
     assert len(calls) == 2
     assert sum("ПрикладЕнерго оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
     assert any("Черга 5.1" in m and "Графік відключень" in m for m in calls)
-    assert any("Черга 6.2" in m and "Графік відключень" in m for m in calls)
+    assert any("Черга 3.1" in m and "Графік відключень" in m for m in calls)
     stored = bot.state_read(state_file)
-    assert stored["house:groups"] == ["GPV5.1","GPV6.2"]
+    assert stored["house:groups"] == ["GPV5.1","GPV3.1"]
     assert not stored.get("house:queue_hold")
 
     asyncio.run(bot.once())
@@ -156,8 +156,8 @@ def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeyp
     current = setup_address(monkeypatch)
     current["queues"] = ["GPV5.1"]
     seed_state(state_file, {
-        "house:groups": ["GPV5.1", "GPV6.2"],
-        "2026-01-01:GPV6.2": {"status":"outages","digest":"old"},
+        "house:groups": ["GPV5.1", "GPV3.1"],
+        "2026-01-01:GPV3.1": {"status":"outages","digest":"old"},
     })
 
     async def load(group_ids):
@@ -170,7 +170,7 @@ def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeyp
     )
     asyncio.run(bot.once())
     assert len(calls) == 2
-    assert "Вилучено: 6.2" in calls[0]
+    assert "Вилучено: 3.1" in calls[0]
     assert any("Черга 5.1" in m for m in calls)
     asyncio.run(bot.once())
     assert len(calls) == 2
@@ -200,7 +200,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
     setup(monkeypatch,state_file)
     current=setup_address(monkeypatch)
     current["queues"]=["GPV5.1"]
-    seed_state(state_file, {"house:groups":["GPV6.2"]})
+    seed_state(state_file, {"house:groups":["GPV3.1"]})
     calls=[]
     async def load(groups):
         return fake_schedule(group="GPV5.1",days=1)
@@ -214,7 +214,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
     with pytest.raises(RuntimeError,match="Помилки Telegram"):
         asyncio.run(bot.once())
     assert any("Графік відключень" in x for x in calls)
-    assert bot.state_read(state_file)["house:groups"] == ["GPV6.2"]
+    assert bot.state_read(state_file)["house:groups"] == ["GPV3.1"]
     # The schedule was delivered once; the one-time queue notice is retried.
     monkeypatch.setattr(bot,"telegram_send",
                         lambda _t,_c,text,deadline=None: calls.append(text))
@@ -227,14 +227,14 @@ def test_migrating_old_queue_hold_does_not_pause_anymore(tmp_path,monkeypatch):
     state_file=tmp_path/"state.json"
     setup(monkeypatch,state_file)
     current=setup_address(monkeypatch)
-    current["queues"]=["GPV5.1","GPV6.2"]
+    current["queues"]=["GPV5.1","GPV3.1"]
     seed_state(state_file, {
         "house:queue_hold": {
             "groups":["GPV5.1"], "notified":True,"code":"old-code"
         }
     })
     async def load(groups):
-        return fake_schedule(group="GPV6.2",days=1)
+        return fake_schedule(group="GPV3.1",days=1)
     monkeypatch.setattr(bot,"get_schedule",load)
     calls=[]
     monkeypatch.setattr(bot,"telegram_send",
@@ -261,9 +261,9 @@ def _late_schedule(slots):
             time_zone={"1":"00-12","2":"12-20","3":"20-24"},
             groups={},
         ),
-        fact=SimpleNamespace(days={stamp:{"GPV6.2":slots}},
+        fact=SimpleNamespace(days={stamp:{"GPV3.1":slots}},
                              update="19.11.2026 20:28"),
-    ),["GPV6.2"]
+    ),["GPV3.1"]
 
 
 def _late_test_setup(tmp_path,monkeypatch,initial):
@@ -289,7 +289,7 @@ def test_outage_published_after_it_ended_is_silent(tmp_path,monkeypatch):
     asyncio.run(bot.once())
     assert sent == []
     state=bot.state_read(path)
-    key="2026-11-19:GPV6.2"
+    key="2026-11-19:GPV3.1"
     assert state[key]["status"]=="historical_only"
     # The next update adds an ongoing outage. Only that new information matters.
     current["source"]={"1":"no","2":"no","3":"no"}
@@ -362,7 +362,7 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     async def unavailable(_secret):
         raise RuntimeError("provider temporary error")
     monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
-    seed_state(state_file, {"house:groups": ["GPV6.2"]})
+    seed_state(state_file, {"house:groups": ["GPV3.1"]})
     checked = []
     async def schedules(groups):
         checked.append(groups)
@@ -372,7 +372,7 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "telegram_send",
                         lambda _t, _c, msg, deadline=None: messages.append(msg))
     asyncio.run(bot.once())
-    assert checked == [("GPV6.2",)]
+    assert checked == [("GPV3.1",)]
     assert len(messages) == 1
 
 
@@ -510,7 +510,7 @@ def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypat
     import alerts
     from types import SimpleNamespace
     async def two_queues(_secret):
-        return SimpleNamespace(group_ids=["GPV5.1","GPV6.2"],
+        return SimpleNamespace(group_ids=["GPV5.1","GPV3.1"],
                                outage_type="",start_date=None,
                                end_date=None,sub_type=None)
     monkeypatch.setattr(alerts,"fetch_address_status",two_queues)
@@ -518,7 +518,7 @@ def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypat
         source, _ = fake_schedule(days=1)
         dt = datetime.now(KYIV).date()
         stamp = str(int(datetime(dt.year,dt.month,dt.day,tzinfo=KYIV).timestamp()))
-        source.fact.days[stamp]["GPV5.1"] = dict(source.fact.days[stamp]["GPV6.2"])
+        source.fact.days[stamp]["GPV5.1"] = dict(source.fact.days[stamp]["GPV3.1"])
         return source,list(groups)
     monkeypatch.setattr(bot,"get_schedule",load)
     sent=[]

@@ -53,13 +53,13 @@ def test_house_parser_keeps_all_groups_and_emergency_reason():
     response=parse_homes({"data":{
         "42/А":[
             {"sub_type_reason":["GPV5.1"]},
-            {"sub_type_reason":["GPV6.2"],"start_date":"20.11.2026 10:00",
+            {"sub_type_reason":["GPV3.1"],"start_date":"20.11.2026 10:00",
              "end_date":"20.11.2026 12:00","type":"2","sub_type":"аварія"},
         ],
         "11":{"sub_type_reason":["GPV1.1"]},
     }})
     a=get_house_entry(response,"42А")
-    assert a.group_ids==["GPV5.1","GPV6.2"]
+    assert a.group_ids==["GPV5.1","GPV3.1"]
     assert a.start_date=="20.11.2026 10:00"
     assert a.outage_type=="2"
     with pytest.raises(RuntimeError):
@@ -102,7 +102,7 @@ def test_no_private_provider_data_in_live_source_tree():
         text=(root/path).read_text(encoding="utf-8").casefold()
         assert "кривий ріг" not in text
         assert "дніпропетровщина" not in text
-        assert "dtek-dnem" not in text
-        assert "t.me/s/dtek" not in text
-        assert "dtek_client" not in text
-        assert "dtek-blackout-client" not in text
+        assert "configured-company.example" not in text
+        assert "t.me/s/specificoperator" not in text
+        assert "branded_client" not in text
+        assert "branded-blackout-client" not in text

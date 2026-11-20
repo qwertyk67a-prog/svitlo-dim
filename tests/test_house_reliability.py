@@ -13,7 +13,7 @@ from house_reliability import (
 
 KYIV = ZoneInfo("Europe/Kyiv")
 DAY = date(2026, 11, 12)
-GROUP = "GPV6.2"
+GROUP = "GPV3.1"
 LABELS = {"1": "17-18", "2": "18-19", "3": "19-20"}
 
 
@@ -48,7 +48,7 @@ def test_four_minute_grace_and_skip_late_reminder():
     items = due_reminders(src, GROUP, on(17,55,30), (5,), {}, parse_verified)
     assert len(items) == 1
     key, message, deadline = items[0]
-    assert key == "reminder:2026-11-12:GPV6.2:1080:5"
+    assert key == "reminder:2026-11-12:GPV3.1:1080:5"
     assert "Нагадування" in message
     assert "17:55" not in message and "18:00" in message
     assert deadline == on(17,59)
@@ -92,40 +92,40 @@ def test_tomorrow_midnight_reminder_can_be_due_today():
 
 def test_initial_single_verified_queue_is_silent():
     state = {}
-    queues, notice = house_queue_transition(state, ("GPV6.2",), GROUP)
-    assert queues == ["GPV6.2"]
+    queues, notice = house_queue_transition(state, ("GPV3.1",), GROUP)
+    assert queues == ["GPV3.1"]
     assert notice is None
 
 
 def test_one_verified_queue_is_replaced_automatically():
-    state = {"house:groups": ["GPV6.2"]}
+    state = {"house:groups": ["GPV3.1"]}
     queues, notice = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert queues == ["GPV5.1"]
     assert "Додано: 5.1" in notice
-    assert "Вилучено: 6.2" in notice
+    assert "Вилучено: 3.1" in notice
     assert "продовжує" in notice
     assert "Вулиця_Приклад" not in notice
     # State must not advance before successful Telegram delivery.
-    assert state["house:groups"] == ["GPV6.2"]
+    assert state["house:groups"] == ["GPV3.1"]
     state["house:groups"] = queues
     _, repeated = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert repeated is None
 
 
 def test_new_queue_added_to_house_without_disabling_old_queue():
-    state = {"house:groups": ["GPV6.2"]}
-    groups, msg = house_queue_transition(state, ("GPV6.2", "GPV5.1"), GROUP)
-    assert groups == ["GPV5.1", "GPV6.2"]
+    state = {"house:groups": ["GPV3.1"]}
+    groups, msg = house_queue_transition(state, ("GPV3.1", "GPV5.1"), GROUP)
+    assert groups == ["GPV5.1", "GPV3.1"]
     assert "Додано: 5.1" in msg
     assert "Вилучено" not in msg
-    assert "Актуальні черги: 5.1, 6.2" in msg
+    assert "Актуальні черги: 5.1, 3.1" in msg
 
 
 def test_old_queue_removed_but_remaining_queue_stays_active():
-    state = {"house:groups": ["GPV5.1", "GPV6.2"]}
+    state = {"house:groups": ["GPV5.1", "GPV3.1"]}
     groups, msg = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert groups == ["GPV5.1"]
-    assert "Вилучено: 6.2" in msg
+    assert "Вилучено: 3.1" in msg
     assert "Додано:" not in msg
 
 
@@ -137,11 +137,11 @@ def test_initial_verified_queues_are_baselined_without_false_change():
 
 def test_invalid_ambiguous_and_missing_groups_are_not_deletions():
     import pytest
-    for value in ([], None, (), ["GPV6.2", "garbage"], ["4.1"]):
+    for value in ([], None, (), ["GPV3.1", "garbage"], ["4.1"]):
         with pytest.raises(ValueError):
             verified_house_queues(value)
-    assert verified_house_queues(["GPV6.2", "GPV5.1", "GPV6.2"]) == (
-        "GPV5.1", "GPV6.2"
+    assert verified_house_queues(["GPV3.1", "GPV5.1", "GPV3.1"]) == (
+        "GPV5.1", "GPV3.1"
     )
 
 
@@ -157,13 +157,13 @@ def test_legacy_queue_hold_not_used_for_auto_tracking():
 
 
 def test_old_state_pruned_without_touching_current_events():
-    state = {"2026-10-01:GPV6.2":"old",
-             "reminder:2026-10-01:GPV6.2:1080:5":{"sent":True},
-             "2026-11-12:GPV6.2":{"digest":"x"},
+    state = {"2026-10-01:GPV3.1":"old",
+             "reminder:2026-10-01:GPV3.1:1080:5":{"sent":True},
+             "2026-11-12:GPV3.1":{"digest":"x"},
              "house:queue_hold":{"code":"abc"},
              "official:last_id":4800}
     assert trim_state(state,DAY) == 2
-    assert "2026-11-12:GPV6.2" in state
+    assert "2026-11-12:GPV3.1" in state
     assert "official:last_id" in state
     assert "house:queue_hold" in state
 
