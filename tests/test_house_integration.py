@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import bot
+from conftest import TEST_CONFIG
 
 KYIV=ZoneInfo("Europe/Kyiv")
 
@@ -29,18 +30,19 @@ def setup(monkeypatch,path):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN","token-for-test")
     monkeypatch.setenv("TELEGRAM_CHAT_ID","-100-test")
     monkeypatch.setenv("STATE_PATH",str(path))
-    monkeypatch.setenv("TEST_QUEUE","6.2")
-    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
+     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
     monkeypatch.setenv("REMINDER_MINUTES","0")
-    monkeypatch.delenv("POWER_CONFIG_JSON",raising=False)
-    monkeypatch.setenv("ALLOW_UNVERIFIED_GROUP","true")
-    monkeypatch.delenv("QUEUE_APPROVAL",raising=False)
+    monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(TEST_CONFIG, ensure_ascii=False))
+    import alerts
+    async def default_home(_private_address):
+        return address_entry(["GPV6.2"])
+    monkeypatch.setattr(alerts, "fetch_address_status", default_home)
 
 
 def test_successful_notification_persisted_when_next_one_fails(tmp_path,monkeypatch):
     state_file=tmp_path/"state.json"
     setup(monkeypatch,state_file)
-    async def load():return fake_schedule()
+    async def load(*_groups):return fake_schedule()
     monkeypatch.setattr(bot,"get_schedule",load)
     calls=[]
     def send(_token,_chat,text,deadline=None):
@@ -61,7 +63,7 @@ def test_successful_notification_persisted_when_next_one_fails(tmp_path,monkeypa
 def test_unchanged_data_is_silent_across_restarts(tmp_path,monkeypatch):
     state_file=tmp_path/"state.json"
     setup(monkeypatch,state_file)
-    async def load():return fake_schedule(days=1)
+    async def load(*_groups):return fake_schedule(days=1)
     monkeypatch.setattr(bot,"get_schedule",load)
     calls=[]
     monkeypatch.setattr(bot,"telegram_send",
@@ -80,10 +82,6 @@ def address_entry(groups):
 
 
 def setup_address(monkeypatch):
-    monkeypatch.setenv(
-        "POWER_CONFIG_JSON",
-        '{"city":"місто","street":"вулиця","house":"12"}',
-    )
     import alerts
     current = {"queues": ["GPV6.2"]}
 
@@ -261,7 +259,7 @@ def _late_test_setup(tmp_path,monkeypatch,initial):
     setup(monkeypatch,path)
     monkeypatch.setattr(bot,"datetime",_FixedDatetime)
     current={"source":initial}
-    async def load():
+    async def load(*_groups):
         return _late_schedule(current["source"])
     monkeypatch.setattr(bot,"get_schedule",load)
     sent=[]
@@ -350,7 +348,7 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     setup_address(monkeypatch)
     import alerts
     async def unavailable(_secret):
-        raise RuntimeError("DTEK temporary error")
+        raise RuntimeError("provider temporary error")
     monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
     state_file.write_text(json.dumps({"house:groups": ["GPV6.2"]}), encoding="utf-8")
     checked = []
@@ -372,7 +370,7 @@ def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypat
     setup_address(monkeypatch)
     import alerts
     async def unavailable(_secret):
-        raise RuntimeError("DTEK temporary error")
+        raise RuntimeError("provider temporary error")
     monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
     called = []
     async def schedules(*args):
@@ -387,7 +385,7 @@ def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypat
 def test_no_address_is_disabled_unless_explicitly_approved(tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     setup(monkeypatch, state_file)
-    monkeypatch.delenv("ALLOW_UNVERIFIED_GROUP")
+    monkeypatch.delenv("POWER_CONFIG_JSON")
     called = []
     async def schedules(*args):
         called.append(args)
@@ -404,7 +402,7 @@ def test_dry_run_never_sends_telegram(tmp_path, monkeypatch):
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    async def schedules():
+    async def schedules(*_groups):
         return fake_schedule(days=1)
     monkeypatch.setattr(bot, "get_schedule", schedules)
     monkeypatch.setattr(bot, "telegram_send",
@@ -419,7 +417,7 @@ def test_dry_run_does_not_change_existing_state(tmp_path, monkeypatch):
     setup(monkeypatch, state_file)
     monkeypatch.setenv("DRY_RUN", "true")
     state_file.write_text('{"unchanged": true}', encoding="utf-8")
-    async def schedules():
+    async def schedules(*_groups):
         return fake_schedule(days=1)
     monkeypatch.setattr(bot, "get_schedule", schedules)
     monkeypatch.setattr(bot, "telegram_send",
@@ -435,7 +433,7 @@ def test_active_emergency_marks_daily_schedule_as_conditional(tmp_path,monkeypat
     state_file.write_text(json.dumps({
         "official:status:emergency:region":{"status":"active"},
     }), encoding="utf-8")
-    async def load():
+    async def load(*_groups):
         return fake_schedule(days=1)
     monkeypatch.setattr(bot,"get_schedule",load)
     messages=[]
@@ -470,13 +468,9 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
     state_file = tmp_path / "state.json"
     setup(monkeypatch,state_file)
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
-    monkeypatch.setenv(
-        "POWER_CONFIG_JSON",
-        '{"city":"м. Зелений Бір","street":"вул. Умовна","house":"12Г"}'
-    )
     import alerts
     async def fail(_secret):
-        raise RuntimeError("DTEK address API offline")
+        raise RuntimeError("provider API offline")
     monkeypatch.setattr(alerts, "fetch_address_status", fail)
     now = datetime.now(KYIV)
     def news():
