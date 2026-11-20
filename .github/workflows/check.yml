@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: dtek-outage-monitor
+  group: power-outage-monitor
   cancel-in-progress: false
 jobs:
   check:
@@ -21,7 +21,7 @@ jobs:
         run: |
           if [[ "$CONFIGURED_BOT_ENABLED" =~ ^[[:space:]]*true[[:space:]]*$ ]]; then
             echo "active=true" >> "$GITHUB_OUTPUT"
-            echo "BOT_ENABLED is exactly true; continuing with DTEK"
+            echo "BOT_ENABLED is exactly true; continuing with configured operator"
           else
             echo "active=false" >> "$GITHUB_OUTPUT"
             if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then

@@ -655,7 +655,7 @@ async def once():
             source, groups = None, []
     except Exception as exc:
         LOG.error("Графік оператор недоступний: %s", type(exc).__name__)
-        source_problems.append("dtek_schedule")
+        source_problems.append("provider_schedule")
         source, groups = None, []
 
     # If an official emergency/GAV regime remains active, the daily GPV
