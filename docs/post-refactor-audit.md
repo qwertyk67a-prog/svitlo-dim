@@ -1,0 +1,75 @@
+# Post-change technical audit
+
+Audit date: 2026-11-20
+Scope: reusable branch, not the currently active default branch.
+
+## Source and address privacy
+
+- Operator name, official site, AJAX endpoint, public announcement feed,
+  city, region, districts, quarters and house address are obtained from
+  the POWER_CONFIG_JSON repository secret.
+- Telegram bot token and destination remain in their own repository secrets.
+- No default operational queue is hardcoded. Queue identities are returned
+  by the chosen address API and verified against private queue_catalog.
+- A public code scan found no former company, locality, house number or
+  regional feed literals in working modules, tests and documentation.
+- Old Git history is unchanged. No private repository or paid storage is used.
+- The public state file is not encrypted. Queue IDs are HMAC-pseudonymized
+  with state_key; stored notices contain only metadata and digests.
+  Previously committed state remains in Git history.
+- Public diagnostic scripts no longer print chat IDs or bot usernames.
+  During manual group discovery, the chat ID is returned inside that
+  Telegram group itself.
+
+## Portability
+
+- Synthetic tests confirm a second city, operator, official Telegram feed,
+  address, group formats and private state-key rollover.
+- A list of valid queue names must be supplied in the private configuration.
+- Only the compatible form-encoded AJAX adapter is implemented.
+  Other company APIs are NOT guaranteed to be compatible simply by replacing
+  a URL. Unsupported adapter names fail closed.
+
+## Transport and data quality
+
+- Signed Yii-style CSRF cookies are bootstrapped before the actual query.
+- CSRF header tokens use a fresh XOR mask and can be refreshed once.
+- HTTP 429 does not launch the browser fallback.
+- Other direct-source failures may use cached Chromium when available.
+- Address lookup rejects ambiguous building numbers and numeric slash
+  collisions; a successful response with no known queue does not invent one.
+- Daily official facts take priority over preliminary weekly tables.
+- Unknown or unreadable schedule cells are not treated as cancellations.
+- A regional message is not proof of actual electricity loss at one home.
+  Geographic forms and negative-place filters must be supplied correctly.
+
+## Checkpoint, delivery and reliability
+
+- Only queue identity components are pseudonymized in checkpoint keys.
+  Date strings, reminder times and digest contents remain unchanged.
+- A changed address or source configuration starts a new checkpoint namespace.
+- Successful Telegram notifications are checkpointed individually.
+- A timeout after Telegram accepted a message may still produce a duplicate.
+- GitHub Actions schedule is best effort, so five-minute accuracy cannot
+  be guaranteed. Public repositories using standard runners are free,
+  but other GitHub limits still apply.
+
+## Automated verification
+
+GitHub Actions Python suite passed: **181 tests** on this branch.
+Includes mock CSRF sequences, invalid configs, synthetic multi-city switches,
+queue changes, initial deployments, retry/deduplication, and public
+checkpoint safety checks.
+
+This is not a live-source acceptance test. The new POWER_CONFIG_JSON secret
+has not been installed or validated against the actual target operator in
+this branch. Real website parser validity, queue assignments, source
+availability and Telegram delivery require read-only preflight workflows
+with the owner's actual GitHub Actions secrets.
+
+## Release decision
+
+Do not merge the branch into the active default branch until the real
+POWER_CONFIG_JSON repository secret is installed and the manual
+**Verify configured address** and **Dry-run source audit** workflows succeed.
+Keep the currently working installation running in the meantime.
