@@ -3,7 +3,11 @@
 Format adapter: form-encoded Yii-style 'getHomeNum' and 'checkDisconUpdate'.
 Different company protocols require a separate, tested adapter.
 """
+import base64
 import logging
+import re
+import secrets
+from urllib.parse import unquote
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
@@ -151,7 +155,60 @@ def form_data(method, fields=None, update_fact=None):
     return result
 
 
+class ProviderRateLimit(RuntimeError):
+    """Respect explicit source rate-limits without browser retries."""
+
+
+_CSRF_RE = re.compile(r'i:1;s:\d+:"([^"]+)"')
+
+
+def _csrf_token_from_cookies(*sources):
+    """Read only signed Yii-formatted CSRF cookies; never log token values."""
+    for source in sources:
+        if not source:
+            continue
+        try:
+            entries = source.items()
+        except AttributeError:
+            continue
+        for name, value in entries:
+            if not str(name).startswith("_csrf"):
+                continue
+            match = _CSRF_RE.search(unquote(str(value)))
+            if match:
+                return match.group(1)
+    return None
+
+
+def _mask_csrf(raw):
+    payload = raw.encode("utf-8")
+    mask = secrets.token_bytes(len(payload))
+    return base64.urlsafe_b64encode(
+        mask + bytes(a ^ b for a, b in zip(mask, payload, strict=True))
+    ).decode("ascii")
+
+
+def _checked_response(response):
+    status = response.status_code
+    if status == 429:
+        raise ProviderRateLimit("Official source rate limited requests")
+    if status != 200:
+        raise RuntimeError(f"Provider API HTTP {status}")
+    try:
+        raw = response.json()
+    except (ValueError, TypeError):
+        raise RuntimeError("Provider API returned invalid JSON") from None
+    if not isinstance(raw, dict) or raw.get("result") is False:
+        raise RuntimeError("Provider API returned invalid data")
+    return raw
+
+
 async def _request(config, form, *, cookies=None, csrf=None):
+    """Bootstrap the signed Yii CSRF cookie before sending the real request.
+
+    A 400 response to an initial tokenless probe is expected. The session
+    retains the cookie, whose embedded raw token must be masked in the header.
+    """
     headers = {
         "User-Agent": AGENT,
         "Origin": urlparse(config["site_url"]).scheme + "://" +
@@ -160,33 +217,61 @@ async def _request(config, form, *, cookies=None, csrf=None):
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
     }
-    if csrf:
-        headers["X-CSRF-Token"] = csrf
     async with AsyncSession(
         timeout=20, cookies=cookies or {}, headers=headers,
         impersonate="chrome120",
     ) as session:
-        response = await session.post(config["ajax_url"], data=form)
-        if response.status_code != 200:
-            raise RuntimeError(f"Provider API returned HTTP {response.status_code}")
-        try:
-            raw = response.json()
-        except (ValueError, TypeError):
-            raise RuntimeError("Provider API returned invalid JSON") from None
-        if not isinstance(raw, dict) or raw.get("result") is False:
-            raise RuntimeError("Provider API returned invalid data")
-        return raw
+        token = csrf
+        if not token:
+            raw_token = _csrf_token_from_cookies(session.cookies, cookies)
+            if not raw_token:
+                probe = await session.post(
+                    config["ajax_url"], data={"method": "getHomeNum"},
+                )
+                if probe.status_code == 429:
+                    raise ProviderRateLimit("Official source rate limited requests")
+                raw_token = _csrf_token_from_cookies(
+                    probe.cookies, session.cookies
+                )
+            if raw_token:
+                token = _mask_csrf(raw_token)
+            else:
+                raise RuntimeError("Official source did not provide a CSRF token")
+        response = await session.post(
+            config["ajax_url"], data=form,
+            headers={**headers, "X-CSRF-Token": token},
+        )
+        if response.status_code == 400:
+            # A rejected or expired token can be refreshed once.
+            probe = await session.post(
+                config["ajax_url"], data={"method": "getHomeNum"},
+            )
+            if probe.status_code == 429:
+                raise ProviderRateLimit("Official source rate limited requests")
+            new_raw = _csrf_token_from_cookies(probe.cookies, session.cookies)
+            if not new_raw:
+                raise RuntimeError("Official source rejected CSRF refresh")
+            response = await session.post(
+                config["ajax_url"], data=form,
+                headers={**headers, "X-CSRF-Token": _mask_csrf(new_raw)},
+            )
+        return _checked_response(response)
 
 
 async def ajax_post(config, form):
     try:
         return await _request(config, form)
+    except ProviderRateLimit:
+        raise
     except Exception as exc:
-        LOG.warning("Direct provider request failed (%s), using browser", type(exc).__name__)
+        LOG.warning("Direct provider request failed (%s), using browser",
+                    type(exc).__name__)
     cookies, csrf = await browser_cookies(config["site_url"])
     try:
         return await _request(config, form, cookies=cookies, csrf=csrf)
-    except Exception as exc:
+    except ProviderRateLimit:
+        raise
+    except Exception:
         raise RuntimeError("Official provider request unavailable") from None
 
 
