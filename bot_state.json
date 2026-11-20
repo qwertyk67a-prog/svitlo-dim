@@ -1,19 +1,7 @@
 {
   "2026-11-20:GPV6.2": {
-    "digest": "4cfbdcfa832ab39a86ce160b42b1f3a8ed138589b0eb6af6f504765b5dd26cb7",
-    "spans": [
-      [
-        780,
-        1020,
-        "off"
-      ],
-      [
-        1410,
-        1440,
-        "off"
-      ]
-    ],
-    "status": "outages"
+    "digest": "f3d2d0131ab8c7e9c96844f0e71e6b421a41f0ebfc3117151abdbe70af3fdbe9",
+    "status": "cancelled"
   },
   "house:groups": [
     "GPV6.2"
