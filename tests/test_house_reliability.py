@@ -115,14 +115,14 @@ def test_one_verified_queue_is_replaced_automatically():
 def test_new_queue_added_to_house_without_disabling_old_queue():
     state = {"house:groups": ["GPV3.1"]}
     groups, msg = house_queue_transition(state, ("GPV3.1", "GPV5.1"), GROUP)
-    assert groups == ["GPV5.1", "GPV3.1"]
+    assert groups == ["GPV3.1", "GPV5.1"]
     assert "Додано: 5.1" in msg
     assert "Вилучено" not in msg
-    assert "Актуальні черги: 5.1, 3.1" in msg
+    assert "Актуальні черги: 3.1, 5.1" in msg
 
 
 def test_old_queue_removed_but_remaining_queue_stays_active():
-    state = {"house:groups": ["GPV5.1", "GPV3.1"]}
+    state = {"house:groups": ["GPV3.1", "GPV5.1"]}
     groups, msg = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert groups == ["GPV5.1"]
     assert "Вилучено: 3.1" in msg

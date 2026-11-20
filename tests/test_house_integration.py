@@ -137,7 +137,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     )
 
     asyncio.run(bot.once())
-    assert requested == [("GPV5.1", "GPV3.1")]
+    assert requested == [("GPV3.1", "GPV5.1")]
     assert len(calls) == 2
     assert sum("ПрикладЕнерго оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
     assert any("Черга 5.1" in m and "Графік відключень" in m for m in calls)
@@ -156,7 +156,7 @@ def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeyp
     current = setup_address(monkeypatch)
     current["queues"] = ["GPV5.1"]
     seed_state(state_file, {
-        "house:groups": ["GPV5.1", "GPV3.1"],
+        "house:groups": ["GPV3.1", "GPV5.1"],
         "2026-01-01:GPV3.1": {"status":"outages","digest":"old"},
     })
 
