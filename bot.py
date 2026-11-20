@@ -502,6 +502,8 @@ async def once():
     if not dry_run and (not token or not chat):
         raise RuntimeError("Відсутні TELEGRAM_BOT_TOKEN або TELEGRAM_CHAT_ID")
 
+    # Validate the private configuration before touching any checkpoint.
+    config = provider_config()
     path = Path(os.getenv("STATE_PATH", "data/state.json"))
     state = state_read(path)
     # Each cloned repository must ignore another home's notification history.
