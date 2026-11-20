@@ -22,6 +22,8 @@ Example POWER_CONFIG_JSON schema (SYNTHETIC details only):
 {
   "adapter": "ajax_v1",
   "operator": "ПрикладЕнерго",
+  "queue_catalog": ["EXAMPLE_1", "EXAMPLE_2"],
+  "queue_display_prefix": "EXAMPLE_",
   "state_key": "ENTER_A_UNIQUE_RANDOM_STRING_OF_AT_LEAST_32_CHARACTERS",
   "site_url": "https://grid.example.invalid/schedule",
   "ajax_url": "https://grid.example.invalid/ajax",
@@ -67,6 +69,10 @@ GitHub does not copy Secrets when cloning a repository. Keep BOT_ENABLED
 disabled until the address, API and test delivery are verified.
 
 ## Automatic queue changes
+
+The private queue_catalog lists all valid group IDs for this supplier.
+The queue_display_prefix controls how each ID appears to residents.
+A complete catalog is necessary to restore anonymized checkpoints.
 
 No fixed queue is stored in the production code. The address API returns
 one or several verified queues. Changes are announced relative to the last

@@ -11,6 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from power_config import provider_config, operator_label, official_site
+from house_reliability import queue_label
 LOG = logging.getLogger("power-alerts")
 KYIV = ZoneInfo("Europe/Kyiv")
 
@@ -639,7 +640,7 @@ def address_decision(entry, state, now, expected=None):
     if (previous is not None and previous != current) or (
         previous is None and current and expected and expected not in current
     ):
-        label = ", ".join(x.removeprefix("GPV") for x in current)
+        label = ", ".join(queue_label(x) for x in current)
         text = (
             f"⚠️ <b>{html.escape(operator_label())} змінив чергу за адресою</b>\n"
             f"Наразі вказані черги: {html.escape(label or 'не визначено')}.\n"

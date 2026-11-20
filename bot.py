@@ -17,6 +17,7 @@ import requests
 
 KYIV = ZoneInfo("Europe/Kyiv")
 from power_config import provider_config, operator_label, official_site, address_json
+from house_reliability import queue_label
 LOG = logging.getLogger("outage-bot")
 
 
@@ -209,7 +210,7 @@ def day_message(day, group, spans, updated=None, event="new", previous=None,
     }
     lines = [
         titles[event],
-        f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
+        f"📅 {day:%d.%m.%Y} · Черга {html.escape(queue_label(group))}",
         f"✅ <b>Добовий графік {html.escape(operator_label())} має пріоритет</b> над попереднім "
         "тижневим прогнозом на цю дату.",
     ]
@@ -248,7 +249,7 @@ def cancellation_message(day, group, updated=None, remaining_today=False):
     """Cancellation is a meaningful change only after a prior outage notice."""
     lines = [
         "✅ <b>Планові відключення скасовано</b>",
-        f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
+        f"📅 {day:%d.%m.%Y} · Черга {html.escape(queue_label(group))}",
         "",
         ("На решту дня відключення за оновленим графіком не заплановані."
          if remaining_today else "За оновленим графіком планових відключень немає."),
@@ -280,7 +281,7 @@ def weekly_message(monday, group, entries, changed=False,
     lines = [
         "🔄 <b>Тижневий прогноз змінено</b>" if changed else
         "📆 <b>Тижневий прогноз можливих відключень</b>",
-        f"Черга {html.escape(group.removeprefix('GPV'))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
+        f"Черга {html.escape(queue_label(group))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
     ]
     weekdays = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
     for day, spans in visible:
@@ -300,7 +301,7 @@ def weekly_cancellation_message(monday, group):
     sunday = monday + timedelta(days=6)
     return "\n".join([
         "✅ <b>Тижневий прогноз відключень скасовано</b>",
-        f"Черга {html.escape(group.removeprefix('GPV'))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
+        f"Черга {html.escape(queue_label(group))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
         "",
         "У оновленій тижневій таблиці планових відключень немає.",
         f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
@@ -412,18 +413,14 @@ def collect_notifications(source, group, today, state=None):
 
 
 def _queue_tokens():
-    """Anonymous reversible identifiers for the finite compatible queue set.
-
-    These are deterministic HMAC pseudonyms, not encryption of the state.
-    """
+    """Pseudonym mapping from the private queue catalog, not a code constant."""
     cfg = provider_config()
     return {
-        f"GPV{first}.{second}": "Q" + hmac.new(
+        group: "Q" + hmac.new(
             cfg["state_key"].encode("utf-8"),
-            f"GPV{first}.{second}".encode("ascii"),
-            hashlib.sha256,
+            group.encode("utf-8"), hashlib.sha256,
         ).hexdigest()[:24]
-        for first in range(1, 7) for second in (1, 2)
+        for group in cfg["queue_catalog"]
     }
 
 

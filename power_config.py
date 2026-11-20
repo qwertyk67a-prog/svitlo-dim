@@ -63,6 +63,19 @@ def provider_config(*, required=True):
             or len(state_key) > 256):
         raise ConfigurationError("state_key must contain at least 32 characters")
     config["state_key"] = state_key
+    catalog = config.get("queue_catalog")
+    if (not isinstance(catalog, list) or not 1 <= len(catalog) <= 128
+            or any(not isinstance(q, str) or
+                   not re.fullmatch(r"[\w .:-]{1,48}", q, flags=re.UNICODE)
+                   for q in catalog)):
+        raise ConfigurationError("queue_catalog must contain 1-128 safe queue IDs")
+    if len(catalog) != len(set(catalog)):
+        raise ConfigurationError("queue_catalog contains duplicates")
+    config["queue_catalog"] = tuple(catalog)
+    prefix = config.get("queue_display_prefix", "")
+    if not isinstance(prefix, str) or len(prefix) > 24:
+        raise ConfigurationError("Invalid queue_display_prefix")
+    config["queue_display_prefix"] = prefix
     for key in ("site_url", "ajax_url", "telegram_feed"):
         config[key] = _https_url(config.get(key), key)
     host = urlparse(config["site_url"]).hostname

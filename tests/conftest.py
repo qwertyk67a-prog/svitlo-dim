@@ -5,6 +5,8 @@ import pytest
 TEST_CONFIG = {
     "adapter": "ajax_v1",
     "operator": "ПрикладЕнерго",
+    "queue_catalog": ["GPV1.1","GPV2.1","GPV3.1","GPV4.1","GPV4.2","GPV5.1"],
+    "queue_display_prefix": "GPV",
     "state_key": "synthetic-repository-checkpoint-key-not-a-secret",
     "site_url": "https://grid.example.invalid/schedule",
     "ajax_url": "https://grid.example.invalid/ajax",
