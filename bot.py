@@ -425,7 +425,9 @@ def _queue_tokens():
 
 
 def _anonymize_state(serialized):
-    for group, opaque in _queue_tokens().items():
+    for group, opaque in sorted(
+        _queue_tokens().items(), key=lambda item: -len(item[0])
+    ):
         serialized = serialized.replace(group, opaque)
     return serialized
 
@@ -809,18 +811,18 @@ async def once():
             persist()
             continue
         if deadline is not None and datetime.now(KYIV) >= deadline:
-            LOG.info("Пропущено прострочене нагадування: %s", key)
+            LOG.info("Пропущено прострочене нагадування: %s", _anonymize_state(key))
             continue
         # Limit to one outgoing Telegram message per second for this one chat.
         delay = 1.05 - (time.monotonic() - last_send) if last_send else 0
         if delay > 0:
             time.sleep(delay)
         if deadline is not None and datetime.now(KYIV) >= deadline:
-            LOG.info("Пропущено прострочене нагадування: %s", key)
+            LOG.info("Пропущено прострочене нагадування: %s", _anonymize_state(key))
             continue
         try:
             if dry_run:
-                LOG.info("DRY-RUN: сформовано сповіщення %s; Telegram не викликано", key)
+                LOG.info("DRY-RUN: сформовано сповіщення %s; Telegram не викликано", _anonymize_state(key))
             else:
                 telegram_send(token, chat, message, deadline=deadline)
         except Exception as exc:
@@ -840,7 +842,7 @@ async def once():
         state[key] = value
         persist()
         sent += 1
-        LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", key)
+        LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", _anonymize_state(key))
 
     LOG.info("%s: %d; помилок доставки: %d",
              "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
