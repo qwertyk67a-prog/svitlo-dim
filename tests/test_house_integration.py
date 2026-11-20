@@ -29,10 +29,10 @@ def setup(monkeypatch,path):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN","token-for-test")
     monkeypatch.setenv("TELEGRAM_CHAT_ID","-100-test")
     monkeypatch.setenv("STATE_PATH",str(path))
-    monkeypatch.setenv("DTEK_GROUP","6.2")
+    monkeypatch.setenv("TEST_QUEUE","6.2")
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
     monkeypatch.setenv("REMINDER_MINUTES","0")
-    monkeypatch.delenv("DTEK_ADDRESS_JSON",raising=False)
+    monkeypatch.delenv("POWER_CONFIG_JSON",raising=False)
     monkeypatch.setenv("ALLOW_UNVERIFIED_GROUP","true")
     monkeypatch.delenv("QUEUE_APPROVAL",raising=False)
 
@@ -81,7 +81,7 @@ def address_entry(groups):
 
 def setup_address(monkeypatch):
     monkeypatch.setenv(
-        "DTEK_ADDRESS_JSON",
+        "POWER_CONFIG_JSON",
         '{"city":"місто","street":"вулиця","house":"12"}',
     )
     import alerts
@@ -128,7 +128,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     asyncio.run(bot.once())
     assert requested == [("GPV5.1", "GPV6.2")]
     assert len(calls) == 2
-    assert sum("ДТЕК оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
+    assert sum("ПрикладЕнерго оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
     assert any("Черга 5.1" in m and "Графік відключень" in m for m in calls)
     assert any("Черга 6.2" in m and "Графік відключень" in m for m in calls)
     stored = json.loads(state_file.read_text(encoding="utf-8"))
@@ -198,7 +198,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
 
     def send(_t,_c,text,deadline=None):
         calls.append(text)
-        if "ДТЕК оновив черги" in text:
+        if "ПрикладЕнерго оновив черги" in text:
             raise RuntimeError("Telegram unavailable for queue-change notice")
     monkeypatch.setattr(bot,"telegram_send",send)
     with pytest.raises(RuntimeError,match="Помилки Telegram"):
@@ -209,7 +209,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
     monkeypatch.setattr(bot,"telegram_send",
                         lambda _t,_c,text,deadline=None: calls.append(text))
     asyncio.run(bot.once())
-    assert sum("ДТЕК оновив черги" in x for x in calls) == 2
+    assert sum("ПрикладЕнерго оновив черги" in x for x in calls) == 2
     assert sum("Графік відключень" in x for x in calls) == 1
 
 
@@ -393,7 +393,7 @@ def test_no_address_is_disabled_unless_explicitly_approved(tmp_path, monkeypatch
         called.append(args)
         return fake_schedule()
     monkeypatch.setattr(bot, "get_schedule", schedules)
-    with pytest.raises(RuntimeError, match="DTEK_ADDRESS_JSON"):
+    with pytest.raises(RuntimeError, match="POWER_CONFIG_JSON"):
         asyncio.run(bot.once())
     assert called == []
 
@@ -471,8 +471,8 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
     setup(monkeypatch,state_file)
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
     monkeypatch.setenv(
-        "DTEK_ADDRESS_JSON",
-        '{"city":"м. Кривий Ріг","street":"вул. Умовна","house":"12Г"}'
+        "POWER_CONFIG_JSON",
+        '{"city":"м. Зелений Бір","street":"вул. Умовна","house":"12Г"}'
     )
     import alerts
     async def fail(_secret):
@@ -480,9 +480,9 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
     monkeypatch.setattr(alerts, "fetch_address_status", fail)
     now = datetime.now(KYIV)
     def news():
-        return ('<div class="tgme_widget_message" data-post="dtek_ua/999">'
+        return ('<div class="tgme_widget_message" data-post="sample_energy/999">'
                 '<div class="tgme_widget_message_text">'
-                'Дніпропетровщина: запроваджено екстрені відключення'
+                'Прикладщина: запроваджено екстрені відключення'
                 '</div><time datetime="' + now.isoformat() + '">x</time></div>')
     monkeypatch.setattr(alerts,"fetch_official_page",news)
     async def should_not_fetch(*args):

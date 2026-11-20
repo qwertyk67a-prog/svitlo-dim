@@ -217,7 +217,7 @@ def test_all_telegram_templates_are_ukrainian():
         assert "1 год 30 хв" in t
         assert "30 хв" in t
         assert "Черга 6.2" in t
-        assert "Джерело: ДТЕК" in t
+        assert "Джерело: ПрикладЕнерго" in t
     c = cancellation_message(TODAY, GROUP)
     assert "Планові відключення скасовано" in c
     assert "гарантовано" not in c
@@ -232,8 +232,8 @@ def test_all_telegram_templates_are_ukrainian():
 
 def test_no_personal_address_in_bot_source():
     source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
-    assert 'os.getenv("DTEK_GROUP", "6.2")' not in source
-    assert "DTEK_ADDRESS_JSON" in source
+    assert 'os.getenv("TEST_QUEUE", "6.2")' not in source
+    assert "POWER_CONFIG_JSON" in source
     assert "get_home_num(" not in source
 
 
@@ -344,7 +344,7 @@ def test_daily_message_explicitly_supersedes_weekly_preview():
         date(2026, 11, 20), GROUP,
         [(780, 1020, "off"), (1410, 1440, "off")],
     )
-    assert "Добовий графік ДТЕК має пріоритет" in message
+    assert "Добовий графік ПрикладЕнерго має пріоритет" in message
 
 
 def test_weekly_forecast_digest_is_not_clock_dependent():

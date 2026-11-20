@@ -10,7 +10,7 @@ from alerts import (
     address_message,
     get_house_entry,
     normalized_house,
-    parse_dtek_date,
+    parse_provider_date,
     official_posts,
     regional_event,
     region_candidates,
@@ -18,7 +18,7 @@ from alerts import (
 
 KYIV=ZoneInfo("Europe/Kyiv")
 NOW=datetime(2026,11,8,16,0,tzinfo=KYIV)
-HOUSE_SCOPE={"city":"м. Кривий Ріг", "street":"вул. Умовна", "house":"12Г"}
+HOUSE_SCOPE={"city":"м. Зелений Бір", "street":"вул. Умовна", "house":"12Г"}
 
 
 def scoped_candidates(page, state, when):
@@ -27,14 +27,14 @@ def scoped_candidates(page, state, when):
 
 
 def fake_post(id, title, date=NOW):
-    return {"id":id,"text":title,"date":date,"url":f"https://t.me/dtek_ua/{id}"}
+    return {"id":id,"text":title,"date":date,"url":f"https://t.me/sample_energy/{id}"}
 
 
 def html_page(posts):
     nodes=[]
     for p in posts:
         nodes.append(
-            f'<div class="tgme_widget_message" data-post="dtek_ua/{p["id"]}">'
+            f'<div class="tgme_widget_message" data-post="sample_energy/{p["id"]}">'
             f'<div class="tgme_widget_message_text">{p["text"]}</div>'
             f'<time datetime="{p["date"].isoformat()}">x</time>'
             "</div>"
@@ -50,22 +50,22 @@ def house(reason="",kind="",start="",end="",groups=("GPV6.2",)):
 
 
 def test_official_html_posts_are_parsed_by_id_and_time():
-    posts=[fake_post(15,"Дніпропетровщина: графіки"),
-           fake_post(16,"Дніпропетровщина: екстрені відключення запроваджено")]
+    posts=[fake_post(15,"Прикладщина: графіки"),
+           fake_post(16,"Прикладщина: екстрені відключення запроваджено")]
     result=official_posts(html_page(posts))
     assert len(result)==2
     assert result[1]["id"]==16
-    assert result[1]["url"]=="https://t.me/dtek_ua/16"
+    assert result[1]["url"]=="https://t.me/sample_energy/16"
 
 
 def test_kyiv_dnipro_city_and_general_news_not_transmitted_to_kryvyi_rih():
     samples=[
-        "‼️ Київ, Київська область та місто Дніпро: тривають екстрені відключення",
-        "‼️ Дніпро: екстрені відключення",
+        "‼️ Київ, Київська область та місто Другоград: тривають екстрені відключення",
+        "‼️ Другоград: екстрені відключення",
         "‼️ Київ: екстрені відключення запроваджено",
-        "Дніпропетровщина: ворог атакує енергооб’єкти ДТЕК",
-        "Дніпропетровщина: графіки відключень на 8 листопада",
-        "Дніпропетровщина: відновлення електропостачання у місті Дніпро",
+        "Прикладщина: ворог атакує енергооб’єкти ПрикладЕнерго",
+        "Прикладщина: графіки відключень на 8 листопада",
+        "Прикладщина: відновлення електропостачання у місті Другоград",
     ]
     # Classification alone is not delivery: scope verification must
     # exclude the different city, even for a restoration announcement.
@@ -78,33 +78,33 @@ def test_kyiv_dnipro_city_and_general_news_not_transmitted_to_kryvyi_rih():
 
 def test_emergency_started_and_cancelled():
     active=regional_event(fake_post(31,
-        "‼️ Дніпропетровщина: екстрені відключення\n"
+        "‼️ Прикладщина: екстрені відключення\n"
         "За командою Укренерго застосовані екстрені відключення."))
     ended=regional_event(fake_post(32,
-        "Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області"))
+        "Прикладщина: екстрені відключення скасовано по всій Прикладній області"))
     assert active["kind"]=="emergency" and active["status"]=="active"
     assert ended["status"]=="ended"
-    assert active["area"]=="Дніпропетровська область"
+    assert active["area"]=="Прикладна область"
 
 
 def test_local_city_emergency_is_applicable():
-    e=regional_event(fake_post(45,"Кривий Ріг: запроваджені екстрені відключення"))
+    e=regional_event(fake_post(45,"Зелений Бір: запроваджені екстрені відключення"))
     assert e["status"]=="active"
-    assert e["area"]=="Кривий Ріг"
+    assert e["area"]=="Зелений Бір"
 
 
 def test_gav_is_not_confused_with_gpv():
     e=regional_event(fake_post(33,
-        "‼️ Дніпропетровщина: запроваджені графіки аварійних відключень"))
+        "‼️ Прикладщина: запроваджені графіки аварійних відключень"))
     assert e is not None and e["kind"]=="gav"
     assert regional_event(fake_post(34,
-        "Дніпропетровщина: графіки погодинних відключень діють")) is None
+        "Прикладщина: графіки погодинних відключень діють")) is None
 
 
 def test_old_emergency_on_first_run_is_silent_and_seeds_latest():
     state={}
     page=html_page([fake_post(
-        10,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+        10,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області",
         NOW-timedelta(hours=7),
     )])
     messages = [x for x in scoped_candidates(page,state,NOW) if x[3]]
@@ -115,7 +115,7 @@ def test_old_emergency_on_first_run_is_silent_and_seeds_latest():
 def test_first_run_recent_active_emergency_notified_once():
     state={}
     page=html_page([fake_post(
-        10,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+        10,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області",
         NOW-timedelta(minutes=15),
     )])
     results=scoped_candidates(page,state,NOW)
@@ -132,9 +132,9 @@ def test_first_run_recent_active_emergency_notified_once():
 def test_first_run_recent_emergency_cancelled_does_not_claim_it_is_active():
     state={}
     page=html_page([
-        fake_post(10,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+        fake_post(10,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області",
                   NOW-timedelta(minutes=30)),
-        fake_post(11,"Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області",
+        fake_post(11,"Прикладщина: екстрені відключення скасовано по всій Прикладній області",
                   NOW-timedelta(minutes=5)),
     ])
     assert scoped_candidates(page,state,NOW)==[]
@@ -143,7 +143,7 @@ def test_first_run_recent_emergency_cancelled_does_not_claim_it_is_active():
 
 def test_recent_active_region_not_confused_with_actual_building_outage():
     event=regional_event(fake_post(
-        12,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+        12,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області",
         NOW-timedelta(minutes=4),
     ))
     from alerts import regional_message
@@ -152,13 +152,13 @@ def test_recent_active_region_not_confused_with_actual_building_outage():
 
 def test_new_status_once_and_repeated_status_silent():
     state={"official:last_id":10}
-    first=html_page([fake_post(11,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області")])
+    first=html_page([fake_post(11,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області")])
     result=scoped_candidates(first,state,NOW)
     assert len([r for r in result if r[3]])==1
     assert state["official:last_id"]==10  # checkpoint must follow a successful send
     for post_id,key,value,text in result:
         state[key]=value
-    repeat=html_page([fake_post(12,"Дніпропетровщина: екстрені відключення тривають по всій Дніпропетровській області")])
+    repeat=html_page([fake_post(12,"Прикладщина: екстрені відключення тривають по всій Прикладній області")])
     result=scoped_candidates(repeat,state,NOW)
     assert not [r for r in result if r[3]]
 
@@ -166,8 +166,8 @@ def test_new_status_once_and_repeated_status_silent():
 def test_start_and_end_in_same_batch_are_silent_if_never_announced():
     state={"official:last_id":10}
     page=html_page([
-        fake_post(11,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області"),
-        fake_post(12,"Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області"),
+        fake_post(11,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області"),
+        fake_post(12,"Прикладщина: екстрені відключення скасовано по всій Прикладній області"),
     ])
     output=scoped_candidates(page,state,NOW)
     assert not [r for r in output if r[3]]
@@ -176,14 +176,14 @@ def test_start_and_end_in_same_batch_are_silent_if_never_announced():
 
 def test_cancel_without_prior_announcement_is_silent():
     state={"official:last_id":10}
-    page=html_page([fake_post(11,"Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області")])
+    page=html_page([fake_post(11,"Прикладщина: екстрені відключення скасовано по всій Прикладній області")])
     output=scoped_candidates(page,state,NOW)
     assert not [r for r in output if r[3]]
 
 
 def test_stale_news_cannot_trigger_notifications():
     state={"official:last_id":10}
-    page=html_page([fake_post(11,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+    page=html_page([fake_post(11,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області",
                     NOW-timedelta(hours=9))])
     assert len([r for r in scoped_candidates(page,state,NOW) if r[3]]) == 1
 
@@ -328,7 +328,7 @@ def test_unknown_address_restoration_time_explicit():
 
 
 def test_actual_dtek_alternate_clock_first_format_detected_correctly():
-    assert parse_dtek_date("15:00 08.11.2026")==parse_dtek_date("08.11.2026 15:00")
+    assert parse_provider_date("15:00 08.11.2026")==parse_provider_date("08.11.2026 15:00")
     item=house(reason="Аварійні роботи",kind="2",
                start="15:00 08.11.2026",end="21:00 08.11.2026")
     result=address_decision(item,{},NOW)
@@ -342,11 +342,11 @@ def test_generic_regional_emergency_is_relevant_but_house_status_unknown():
     """Even partial restrictions in a containing region justify a cautious alert."""
     state={"official:last_id":10}
     post=html_page([fake_post(11,
-        "Дніпропетровщина: запроваджено екстрені відключення")])
+        "Прикладщина: запроваджено екстрені відключення")])
     rows=scoped_candidates(post,state,NOW)
     notices=[r[3] for r in rows if r[3]]
     assert len(notices)==1
-    assert "Дніпропетровська область" in notices[0]
+    assert "Прикладна область" in notices[0]
     assert "Фактичну наявність електроенергії у будинку не підтверджено" in notices[0]
 
 
@@ -354,7 +354,7 @@ def test_generic_regional_emergency_is_relevant_but_house_status_unknown():
 def test_exact_home_scoped_emergency_message_is_sent():
     state={"official:last_id":10}
     post=html_page([fake_post(11,
-        "Кривий Ріг: запроваджено екстрені відключення. "
+        "Зелений Бір: запроваджено екстрені відключення. "
         "вул. Умовна, буд. 12Г")])
     rows=scoped_candidates(post,state,NOW)
     assert len([r for r in rows if r[3]])==1
@@ -371,8 +371,8 @@ def test_emergency_elsewhere_is_ignored_even_when_entire_area():
 def test_late_dtek_announcement_recovered_at_next_check():
     state={"official:last_id":10}
     post=html_page([fake_post(11,
-        "Дніпропетровщина: запроваджено екстрені відключення "
-        "по всій Дніпропетровській області",
+        "Прикладщина: запроваджено екстрені відключення "
+        "по всій Прикладній області",
         NOW-timedelta(hours=5))])
     rows=scoped_candidates(post,state,NOW)
     assert len([r for r in rows if r[3]])==1
@@ -383,7 +383,7 @@ def test_partial_pokrovskyi_district_notice_sent_only_with_private_scope():
     from alerts import region_candidates
     private_scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     page=html_page([fake_post(11,
-        "Кривий Ріг: частково знеструмлено Зразковий район")])
+        "Зелений Бір: частково знеструмлено Зразковий район")])
     narrow=region_candidates(page,{"official:last_id":10},NOW,scope=private_scope)
     notes=[r[3] for r in narrow if r[3]]
     assert len(notes)==1
@@ -397,7 +397,7 @@ def test_partial_quarter_notice_sent_only_for_matching_private_quarter():
     from alerts import region_candidates
     private_scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     page=html_page([fake_post(11,
-        "Кривий Ріг: частково знеструмлено 987 квартал")])
+        "Зелений Бір: частково знеструмлено 987 квартал")])
     matches=region_candidates(page,{"official:last_id":10},NOW,scope=private_scope)
     assert len([r for r in matches if r[3]])==1
     miss=region_candidates(page,{"official:last_id":10},NOW,
@@ -407,13 +407,13 @@ def test_partial_quarter_notice_sent_only_for_matching_private_quarter():
 
 def test_partial_area_outage_report_detected_as_distinct_event():
     event=regional_event(fake_post(13,
-        "Дніпропетровщина: частково знеструмлено область"))
+        "Прикладщина: частково знеструмлено область"))
     assert event and event["kind"]=="area" and event["status"]=="active"
 
 
 def test_different_city_inside_the_same_oblast_is_silent():
     page=html_page([fake_post(14,
-        "Дніпропетровщина: екстрені відключення лише у місті Нікополь")])
+        "Прикладщина: екстрені відключення лише у місті Іншоград")])
     assert not [r for r in scoped_candidates(page,{"official:last_id":10},NOW) if r[3]]
 
 
@@ -421,7 +421,7 @@ def test_different_city_inside_the_same_oblast_is_silent():
 def test_partial_area_restoration_notified_only_after_prior_area_alert():
     scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     first=html_page([fake_post(11,
-        "Кривий Ріг: частково знеструмлено Зразковий район")])
+        "Зелений Бір: частково знеструмлено Зразковий район")])
     state={"official:last_id":10}
     opened=region_candidates(first,state,NOW,scope=scope)
     first_messages=[r[3] for r in opened if r[3]]
@@ -429,7 +429,7 @@ def test_partial_area_restoration_notified_only_after_prior_area_alert():
     for _id,key,value,_message in opened:
         state[key]=value
     restored=html_page([fake_post(12,
-        "Кривий Ріг: відновлено електропостачання у Зразковому районі")])
+        "Зелений Бір: відновлено електропостачання у Зразковому районі")])
     ended=region_candidates(restored,state,NOW,scope=scope)
     sent=[r[3] for r in ended if r[3]]
     assert len(sent)==1
@@ -442,7 +442,7 @@ def test_partial_area_restoration_notified_only_after_prior_area_alert():
 def test_partial_area_restoration_without_prior_event_is_silent():
     scope={**HOUSE_SCOPE,"district":"Зразковий район","quarter":"987 квартал"}
     page=html_page([fake_post(15,
-        "Кривий Ріг: відновлено електропостачання у Зразковому районі")])
+        "Зелений Бір: відновлено електропостачання у Зразковому районі")])
     rows=region_candidates(page,{"official:last_id":14},NOW,scope=scope)
     assert not [r for r in rows if r[3]]
 
@@ -477,9 +477,9 @@ def test_existing_ongoing_outage_ending_early_notifies_cancel():
 
 def test_official_emergency_ended_before_first_observation_is_silent():
     page=html_page([
-        fake_post(20,"Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області",
+        fake_post(20,"Прикладщина: запроваджені екстрені відключення по всій Прикладній області",
                   NOW-timedelta(minutes=30)),
-        fake_post(21,"Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області",
+        fake_post(21,"Прикладщина: екстрені відключення скасовано по всій Прикладній області",
                   NOW-timedelta(minutes=8)),
     ])
     rows=scoped_candidates(page,{"official:last_id":19},NOW)
@@ -488,7 +488,7 @@ def test_official_emergency_ended_before_first_observation_is_silent():
 
 def test_official_emergency_end_still_notifies_if_started_was_previously_sent():
     page=html_page([fake_post(21,
-         "Дніпропетровщина: екстрені відключення скасовано по всій Дніпропетровській області",
+         "Прикладщина: екстрені відключення скасовано по всій Прикладній області",
          NOW-timedelta(minutes=8))])
     state={"official:last_id":20,"official:status:emergency:region":"active"}
     rows=scoped_candidates(page,state,NOW)
@@ -499,7 +499,7 @@ def test_official_emergency_end_still_notifies_if_started_was_previously_sent():
 
 def test_post_with_explicitly_elapsed_end_never_starts_outage_notice():
     page=html_page([fake_post(20,
-        "Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області. "
+        "Прикладщина: запроваджені екстрені відключення по всій Прикладній області. "
         "Орієнтовне завершення: 08.11.2026 15:00",NOW-timedelta(minutes=4))])
     rows=scoped_candidates(page,{"official:last_id":19},NOW)
     assert not [r for r in rows if r[3]]
@@ -507,7 +507,7 @@ def test_post_with_explicitly_elapsed_end_never_starts_outage_notice():
 
 def test_post_with_future_explicit_end_is_not_suppressed():
     page=html_page([fake_post(20,
-        "Дніпропетровщина: запроваджені екстрені відключення по всій Дніпропетровській області. "
+        "Прикладщина: запроваджені екстрені відключення по всій Прикладній області. "
         "Орієнтовне завершення: 08.11.2026 18:00",NOW-timedelta(minutes=4))])
     rows=scoped_candidates(page,{"official:last_id":19},NOW)
     assert len([r for r in rows if r[3]])==1
@@ -515,7 +515,7 @@ def test_post_with_future_explicit_end_is_not_suppressed():
 
 def test_direct_ukrenergo_order_without_colon_is_parsed():
     page = html_page([fake_post(20,
-        "За командою Укренерго на Дніпропетровщині запроваджено "
+        "За командою Укренерго на Прикладщині запроваджено "
         "екстрені відключення")])
     notices = [x for x in scoped_candidates(
         page, {"official:last_id": 19}, NOW) if x[3]]
@@ -525,7 +525,7 @@ def test_direct_ukrenergo_order_without_colon_is_parsed():
 
 def test_older_post_with_future_official_end_is_relevant():
     page = html_page([fake_post(22,
-        "Дніпропетровщина: запроваджено екстрені відключення. "
+        "Прикладщина: запроваджено екстрені відключення. "
         "Орієнтовне завершення: 08.11.2026 19:00",
         NOW - timedelta(hours=9))])
     notices = [x for x in scoped_candidates(
@@ -537,12 +537,12 @@ def test_older_post_with_future_official_end_is_relevant():
 def test_official_repeated_active_with_revised_end_notified():
     state = {"official:last_id": 10}
     first = html_page([fake_post(11,
-        "Дніпропетровщина: запроваджено екстрені відключення. "
+        "Прикладщина: запроваджено екстрені відключення. "
         "Орієнтовне завершення: 08.11.2026 18:00")])
     for _id, key, value, _message in scoped_candidates(first, state, NOW):
         state[key] = value
     changed = html_page([fake_post(12,
-        "Дніпропетровщина: екстрені відключення тривають. "
+        "Прикладщина: екстрені відключення тривають. "
         "Орієнтовне завершення: 08.11.2026 20:00")])
     notices = [x for x in scoped_candidates(changed, state, NOW) if x[3]]
     assert len(notices) == 1
@@ -555,7 +555,7 @@ def test_official_repeated_active_with_revised_end_notified():
 
 def test_regional_record_tracks_only_public_metadata():
     page = html_page([fake_post(21,
-        "Дніпропетровщина: запроваджено екстрені відключення")])
+        "Прикладщина: запроваджено екстрені відключення")])
     message = next(x for x in scoped_candidates(
         page, {"official:last_id": 20}, NOW) if x[3])
     record = message[2]
@@ -592,7 +592,7 @@ def test_house_number_separators_not_confused():
 
 def test_regional_transition_to_gpv_ends_emergency():
     e = regional_event(fake_post(
-        101, "Дніпропетровщина: за командою Укренерго "
+        101, "Прикладщина: за командою Укренерго "
              "переходимо до стабілізаційних графіків відключень"
     ))
     assert e and e["kind"] == "emergency" and e["status"] == "ended"
@@ -600,10 +600,10 @@ def test_regional_transition_to_gpv_ends_emergency():
 
 def test_two_distinct_official_activations_in_one_batch():
     page = html_page([
-        fake_post(201, "Дніпропетровщина: запроваджено екстрені відключення "
-                       "по всій Дніпропетровській області"),
-        fake_post(202, "Дніпропетровщина: введено нові екстрені відключення "
-                       "по всій Дніпропетровській області"),
+        fake_post(201, "Прикладщина: запроваджено екстрені відключення "
+                       "по всій Прикладній області"),
+        fake_post(202, "Прикладщина: введено нові екстрені відключення "
+                       "по всій Прикладній області"),
     ])
     messages = [item for item in scoped_candidates(
         page, {"official:last_id": 200}, NOW
@@ -614,13 +614,13 @@ def test_two_distinct_official_activations_in_one_batch():
 
 def test_edited_official_post_detected_even_with_same_post_id():
     page = html_page([fake_post(
-        210, "Дніпропетровщина: запроваджено екстрені відключення. "
+        210, "Прикладщина: запроваджено екстрені відключення. "
              "Орієнтовне завершення: 08.11.2026 18:00")])
     state = {"official:last_id": 209}
     for _id, key, value, _message in scoped_candidates(page, state, NOW):
         state[key] = value
     changed = html_page([fake_post(
-        210, "Дніпропетровщина: запроваджено екстрені відключення. "
+        210, "Прикладщина: запроваджено екстрені відключення. "
              "Орієнтовне завершення: 08.11.2026 19:00")])
     messages = [x for x in scoped_candidates(changed, state, NOW) if x[3]]
     assert len(messages) == 1
@@ -629,19 +629,19 @@ def test_edited_official_post_detected_even_with_same_post_id():
 
 def test_missing_revised_end_is_not_an_end_time_change():
     first = html_page([fake_post(
-        230, "Дніпропетровщина: запроваджено екстрені відключення. "
+        230, "Прикладщина: запроваджено екстрені відключення. "
              "Орієнтовне завершення: 08.11.2026 19:00")])
     state = {"official:last_id": 229}
     for _id, key, value, _message in scoped_candidates(first, state, NOW):
         state[key] = value
     second = html_page([fake_post(
-        231, "Дніпропетровщина: екстрені відключення тривають")])
+        231, "Прикладщина: екстрені відключення тривають")])
     assert not [x for x in scoped_candidates(second, state, NOW) if x[3]]
 
 
 def test_real_older_unended_report_is_not_suppressed_six_hours_later():
     page = html_page([fake_post(
-        232, "Дніпропетровщина: запроваджено екстрені відключення",
+        232, "Прикладщина: запроваджено екстрені відключення",
         NOW - timedelta(hours=9))])
     assert len([x for x in scoped_candidates(
         page, {"official:last_id": 231}, NOW) if x[3]]) == 1
@@ -650,7 +650,7 @@ def test_real_older_unended_report_is_not_suppressed_six_hours_later():
 def test_transition_from_emergency_to_gpv_closes_prior_status():
     active = {"official:last_id": 240, "official:status:emergency:region": "active"}
     page = html_page([fake_post(
-        241, "Дніпропетровщина: за командою Укренерго "
+        241, "Прикладщина: за командою Укренерго "
              "переходимо до стабілізаційних графіків відключень")])
     notices = [x for x in scoped_candidates(page, active, NOW) if x[3]]
     assert len(notices) == 1
@@ -660,13 +660,13 @@ def test_transition_from_emergency_to_gpv_closes_prior_status():
 def test_edit_of_prior_official_post_without_time_still_reported():
     state = {"official:last_id": 300}
     first = html_page([fake_post(
-        301, "Дніпропетровщина: запроваджено екстрені відключення "
-             "на території Дніпропетровської області")])
+        301, "Прикладщина: запроваджено екстрені відключення "
+             "на території Прикладної області")])
     for _pid, key, value, _msg in scoped_candidates(first, state, NOW):
         state[key] = value
     revised = html_page([fake_post(
-        301, "Дніпропетровщина: запроваджено екстрені відключення "
-             "по всій території Дніпропетровської області")])
+        301, "Прикладщина: запроваджено екстрені відключення "
+             "по всій території Прикладної області")])
     messages = [x[3] for x in scoped_candidates(revised, state, NOW) if x[3]]
     assert len(messages) == 1
     assert "змінив офіційне повідомлення" in messages[0].casefold()
@@ -676,7 +676,7 @@ def test_untrusted_hash_state_does_not_crash_monitor():
     state = {"official:last_id": 400,
              "official:post_hashes": {"invalid": "hash"}}
     page = html_page([fake_post(
-        401, "Дніпропетровщина: екстрені відключення запроваджено")])
+        401, "Прикладщина: екстрені відключення запроваджено")])
     assert [row for row in scoped_candidates(page, state, NOW) if row[3]]
 
 
