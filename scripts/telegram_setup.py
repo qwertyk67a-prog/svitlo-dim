@@ -82,9 +82,16 @@ def main():
             raise SetupError("Команду /chatid не знайдено. Надішліть її в групу й повторіть discover")
         if len(groups) > 1:
             raise SetupError("Команда /chatid знайдена в кількох групах. Потрібне однозначне визначення")
-        print("TELEGRAM_CHAT_ID =", groups[0])
-        print("Збережіть це число в Repository secret TELEGRAM_CHAT_ID")
-        print("Увага: журнал публічного GitHub доступний стороннім")
+        # Never print chat identifiers to public GitHub Actions logs.
+        # The requesting group gets its own ID directly in Telegram.
+        call_telegram(
+            token, "sendMessage", chat_id=groups[0],
+            disable_notification="true",
+            text=("ID цієї групи: " + str(groups[0]) +
+                  "\nЗбережіть ID у GitHub Secret TELEGRAM_CHAT_ID. "
+                  "Не публікуйте токен бота."),
+        )
+        print("ID надіслано у групу Telegram; у GitHub-журналі його немає")
         return
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not re.fullmatch(r"-\d+", chat_id):
