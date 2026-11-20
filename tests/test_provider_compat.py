@@ -352,3 +352,20 @@ def test_short_queue_codes_do_not_replace_dates_or_reminder_numbers(
     assert '"house:groups": [\n    "Q' in raw
     assert '"2026-11-21:1"' not in raw
     assert state_read(path)==state
+
+
+
+def test_region_prefix_is_not_misidentified_as_different_city(monkeypatch):
+    from event_scope import house_scope_from_secret, coverage_for_house
+    config=json.loads(json.dumps(TEST_CONFIG))
+    config["other_places"]=["приклад", "іншоград"]
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(config,ensure_ascii=False))
+    scope=house_scope_from_secret(address_json())
+    status=coverage_for_house(
+        "Прикладщина: запроваджено екстрені відключення",scope
+    )
+    assert status and status["level"]=="region"
+    elsewhere=coverage_for_house(
+        "Прикладщина: екстрені відключення в місті Іншоград",scope
+    )
+    assert elsewhere is None
