@@ -76,3 +76,7 @@ Do not merge the branch into the active default branch until the real
 POWER_CONFIG_JSON repository secret is installed and the manual
 **Verify configured address** and **Dry-run source audit** workflows succeed.
 Keep the currently working installation running in the meantime.
+
+## Namespace stability
+
+The installation checkpoint now uses canonicalized operational identity, not raw JSON bytes. Whitespace and JSON key ordering do not reset notification history. Different properties, Telegram destinations or bot credentials remain independent. This needs a first-run checkpoint migration when enabling the new configuration.

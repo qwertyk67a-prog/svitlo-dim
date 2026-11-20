@@ -4,6 +4,8 @@ The public repository contains no actual operator endpoints or house address.
 Only the selected compatible adapter can be used; never execute arbitrary
 modules, URLs or Python code supplied in configuration.
 """
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -142,3 +144,27 @@ def public_territory(config=None):
         "other_regions": config["other_regions"],
         "headline_prefixes": config["headline_prefixes"],
     }
+
+
+def checkpoint_namespace(config, bot_token="", chat_id=""):
+    """Stable per-installation identity, unaffected by JSON formatting.
+
+    A real destination change requires a fresh notification checkpoint.
+    No private address or Telegram credentials are written to state.
+    """
+    relevant = {
+        "adapter": config["adapter"],
+        "operator": config["operator"],
+        "site_url": config["site_url"],
+        "ajax_url": config["ajax_url"],
+        "telegram_feed": config["telegram_feed"],
+        "address": config["address"],
+        "bot_token": bot_token,
+        "chat_id": chat_id,
+    }
+    canonical = json.dumps(
+        relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return hmac.new(
+        config["state_key"].encode("utf-8"), canonical, hashlib.sha256,
+    ).hexdigest()

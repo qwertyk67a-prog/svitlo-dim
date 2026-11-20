@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 KYIV = ZoneInfo("Europe/Kyiv")
-from power_config import provider_config, operator_label, official_site, address_json
+from power_config import provider_config, operator_label, official_site, address_json, checkpoint_namespace
 from house_reliability import queue_label
 LOG = logging.getLogger("outage-bot")
 
@@ -571,11 +571,7 @@ async def once():
     state = state_read(path)
     # Each cloned repository must ignore another home's notification history.
     # HMAC protects the address identity from straightforward dictionary guesses.
-    identity = hmac.new(
-        config["state_key"].encode("utf-8"),
-        os.environ["POWER_CONFIG_JSON"].encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    identity = checkpoint_namespace(config, token, chat)
     if state.get("config:namespace") != identity:
         state = {"config:namespace": identity}
 

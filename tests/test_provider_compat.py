@@ -369,3 +369,29 @@ def test_region_prefix_is_not_misidentified_as_different_city(monkeypatch):
         "Прикладщина: екстрені відключення в місті Іншоград",scope
     )
     assert elsewhere is None
+
+
+
+def test_checkpoint_namespace_ignores_json_layout_and_key_order(monkeypatch):
+    from power_config import checkpoint_namespace
+    first=json.loads(json.dumps(TEST_CONFIG,ensure_ascii=False))
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(first,ensure_ascii=False))
+    ns1=checkpoint_namespace(provider_config(),"token-example","-1001")
+    alternate=dict(reversed(list(first.items())))
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(
+        alternate,ensure_ascii=False,indent=4,
+    ))
+    ns2=checkpoint_namespace(provider_config(),"token-example","-1001")
+    assert ns1==ns2
+
+
+def test_checkpoint_namespace_changes_for_property_and_destination(monkeypatch):
+    from power_config import checkpoint_namespace
+    config=json.loads(json.dumps(TEST_CONFIG))
+    original=checkpoint_namespace(config,"bot-A","-1001")
+    changed=json.loads(json.dumps(config))
+    changed["address"]["house"]="88"
+    assert checkpoint_namespace(changed,"bot-A","-1001")!=original
+    assert checkpoint_namespace(config,"bot-A","-1002")!=original
+    assert checkpoint_namespace(config,"bot-B","-1001")!=original
+    assert checkpoint_namespace(config,"bot-A","-1001")==original
