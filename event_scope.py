@@ -250,6 +250,9 @@ def coverage_for_house(announcement, scope):
         return None
     if _contains(affected, territory["other_regions"]) and not region_named:
         return None
+    if re.search(r"\b(?:лише|тільки|виключно)\s+(?:у|в|на)\b",
+                 affected) and not city_named and not region_named:
+        return None
 
     whole_region = bool(re.search(
         r"(?:по|на|в|у)\s+всій\s+(?:територі\w*\s+)?област\w*|"

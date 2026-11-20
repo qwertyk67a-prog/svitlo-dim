@@ -233,7 +233,7 @@ def test_all_telegram_templates_are_ukrainian():
 def test_no_personal_address_in_bot_source():
     source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
     assert 'os.getenv("TEST_QUEUE", "6.2")' not in source
-    assert "POWER_CONFIG_JSON" in source
+    assert "address_json()" in source
     assert "get_home_num(" not in source
 
 

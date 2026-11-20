@@ -117,8 +117,8 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     if not added and not removed:
         return list(current), None
 
-    title = ("🔄 <b>Оператор оновив черги будинку</b>" if has_previous
-             else "⚡️ <b>Уточнено черги будинку</b>")
+    title = (f"🔄 <b>{html.escape(operator_label())} оновив черги будинку</b>"
+             if has_previous else "⚡️ <b>Уточнено черги будинку</b>")
     lines = [title]
     if added:
         lines.append("➕ Додано: " + ", ".join(

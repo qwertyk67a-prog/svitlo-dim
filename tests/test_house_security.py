@@ -66,7 +66,7 @@ def test_verify_address_invoked_as_module_and_never_sends_telegram():
     assert "python -m scripts.verify_address" in workflow
     assert "python scripts/verify_address.py" not in workflow
     assert "secrets.POWER_CONFIG_JSON" in workflow
-    assert "SOURCE_BROWSER" in workflow
+    assert "POWER_CONFIG_JSON" in workflow
     assert "secrets.TELEGRAM_BOT_TOKEN" not in workflow
     import importlib
     verifier=importlib.import_module("scripts.verify_address")
@@ -88,7 +88,8 @@ def test_dependencies_pinned_against_compatible_constraints():
     assert "-c constraints.txt" in requirements
     assert "requests==" in requirements
     assert "beautifulsoup4==" in requirements
-    assert "provider_transport==" in requirements
+    assert "curl-cffi==" in requirements
+    assert "playwright-stealth==" in requirements
     assert "playwright==" in (ROOT / "constraints.txt").read_text()
 
 
