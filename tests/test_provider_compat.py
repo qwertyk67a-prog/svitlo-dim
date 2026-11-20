@@ -135,7 +135,7 @@ def test_new_private_state_key_produces_different_anonymous_ids(tmp_path,monkeyp
     state_write(path,state)
     before=path.read_text(encoding="utf-8")
     changed=json.loads(json.dumps(TEST_CONFIG))
-    changed["state_key"]="a completely different 32-plus character test key"
+    changed["state_key"]="fedcba9876543210" * 4
     monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(changed,ensure_ascii=False))
     # The old public pseudonym cannot be mistaken for a new queue.
     assert state_read(path)!=state
@@ -395,3 +395,18 @@ def test_checkpoint_namespace_changes_for_property_and_destination(monkeypatch):
     assert checkpoint_namespace(config,"bot-A","-1002")!=original
     assert checkpoint_namespace(config,"bot-B","-1001")!=original
     assert checkpoint_namespace(config,"bot-A","-1001")==original
+
+
+
+@pytest.mark.parametrize("bad_key", [
+    "",
+    "a" * 64,
+    "not-a-random-64-character-hexadecimal-state-key",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+])
+def test_weak_or_invalid_state_key_rejected(monkeypatch, bad_key):
+    config=json.loads(json.dumps(TEST_CONFIG))
+    config["state_key"]=bad_key
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(config,ensure_ascii=False))
+    with pytest.raises(ConfigurationError,match="64 random hexadecimal"):
+        provider_config()

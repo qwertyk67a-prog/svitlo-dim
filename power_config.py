@@ -61,9 +61,15 @@ def provider_config(*, required=True):
     for key in ("operator", "city_label", "region_label"):
         config[key] = _name(config.get(key), key)
     state_key = config.get("state_key")
-    if (not isinstance(state_key, str) or len(state_key) < 32
-            or len(state_key) > 256):
-        raise ConfigurationError("state_key must contain at least 32 characters")
+    # A valid format is not evidence of randomness. Users must generate this
+    # value with a cryptographically secure local generator.
+    if (not isinstance(state_key, str)
+            or re.fullmatch(r"[0-9a-fA-F]{64}", state_key) is None
+            or len(set(state_key.casefold())) < 10):
+        raise ConfigurationError(
+            "state_key must be 64 random hexadecimal characters "
+            "(generate with Python secrets.token_hex(32))"
+        )
     config["state_key"] = state_key
     catalog = config.get("queue_catalog")
     if (not isinstance(catalog, list) or not 1 <= len(catalog) <= 128

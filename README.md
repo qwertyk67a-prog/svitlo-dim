@@ -24,7 +24,7 @@ Example POWER_CONFIG_JSON schema (SYNTHETIC details only):
   "operator": "ПрикладЕнерго",
   "queue_catalog": ["EXAMPLE_1", "EXAMPLE_2"],
   "queue_display_prefix": "EXAMPLE_",
-  "state_key": "ENTER_A_UNIQUE_RANDOM_STRING_OF_AT_LEAST_32_CHARACTERS",
+  "state_key": "REPLACE_WITH_64_RANDOM_HEX_CHARACTERS",
   "site_url": "https://grid.example.invalid/schedule",
   "ajax_url": "https://grid.example.invalid/ajax",
   "telegram_feed": "https://t.me/s/sample_energy",
@@ -90,3 +90,11 @@ No paid hosting or encryption service has been added.
 
 GitHub Actions scheduling is best-effort; exact five-minute updates and
 exactly-once Telegram delivery are not guaranteed.
+
+Generate your individual state_key **locally** using:
+
+~~~bash
+python -c "import secrets; print(secrets.token_hex(32))"
+~~~
+
+Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Never copy an example key. The format validator cannot prove that an accepted key is truly random.
