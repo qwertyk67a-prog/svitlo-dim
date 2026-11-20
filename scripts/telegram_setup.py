@@ -71,7 +71,7 @@ def main():
     me = call_telegram(token, "getMe")
     if not isinstance(me, dict) or not me.get("is_bot") or not me.get("username"):
         raise SetupError("Telegram не підтвердив бота")
-    print("Бот підтверджений: @" + me["username"])
+    print("Бот підтверджено; публічний журнал не містить його імені")
     if mode == "discover":
         updates = call_telegram(
             token, "getUpdates", limit=100, timeout=0,
