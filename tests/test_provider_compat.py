@@ -325,3 +325,30 @@ def test_second_city_operator_channel_and_queue_are_private(monkeypatch):
     assert posts[0]["url"].endswith("another_grid/14")
     from house_reliability import verified_house_queues
     assert verified_house_queues(["Q-B"])==("Q-B",)
+
+
+
+def test_short_queue_codes_do_not_replace_dates_or_reminder_numbers(
+        monkeypatch,tmp_path):
+    from bot import state_read, state_write
+    cfg=json.loads(json.dumps(TEST_CONFIG))
+    cfg["queue_catalog"]=["1","10"]
+    cfg["queue_display_prefix"]=""
+    monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(cfg,ensure_ascii=False))
+    path=tmp_path/"state.json"
+    state={
+        "house:groups":["1","10"],
+        "2026-11-21:1":{"digest":"123456","status":"outages"},
+        "week:2026-11-21:10":{"digest":"998877","status":"outages"},
+        "reminder:2026-11-21:1:360:5":{"sent":True},
+        "official:last_id":111,
+    }
+    state_write(path,state)
+    raw=path.read_text(encoding="utf-8")
+    assert "2026-11-21" in raw
+    assert ":360:5" in raw
+    assert '"digest": "123456"' in raw
+    assert '"official:last_id": 111' in raw
+    assert '"house:groups": [\n    "Q' in raw
+    assert '"2026-11-21:1"' not in raw
+    assert state_read(path)==state
