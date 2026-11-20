@@ -559,8 +559,10 @@ def test_regional_record_tracks_only_public_metadata():
     message = next(x for x in scoped_candidates(
         page, {"official:last_id": 20}, NOW) if x[3])
     record = message[2]
-    assert {"operator", "source", "published", "detected", "start",
-            "end", "area", "status", "event_id"} <= set(record)
+    assert {"source", "published", "detected", "start",
+            "end", "status", "event_id"} <= set(record)
+    assert "operator" not in record and "area" not in record
+    assert "t.me" not in str(record)
     assert "Умовна" not in str(record) and "12Г" not in str(record)
 
 
