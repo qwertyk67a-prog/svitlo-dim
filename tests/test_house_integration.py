@@ -30,7 +30,7 @@ def setup(monkeypatch,path):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN","token-for-test")
     monkeypatch.setenv("TELEGRAM_CHAT_ID","-100-test")
     monkeypatch.setenv("STATE_PATH",str(path))
-     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
+    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
     monkeypatch.setenv("REMINDER_MINUTES","0")
     monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(TEST_CONFIG, ensure_ascii=False))
     import alerts
