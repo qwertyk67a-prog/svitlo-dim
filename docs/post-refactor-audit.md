@@ -40,6 +40,8 @@ Scope: reusable branch, not the currently active default branch.
   collisions; a successful response with no known queue does not invent one.
 - Daily official facts take priority over preliminary weekly tables.
 - Unknown or unreadable schedule cells are not treated as cancellations.
+- Place matching uses word boundaries to prevent a city name from matching
+  the beginning of a different regional name.
 - A regional message is not proof of actual electricity loss at one home.
   Geographic forms and negative-place filters must be supplied correctly.
 
@@ -56,9 +58,10 @@ Scope: reusable branch, not the currently active default branch.
 
 ## Automated verification
 
-GitHub Actions Python suite passed: **181 tests** on this branch.
+GitHub Actions Python suite passed: **182 tests** on this branch.
 Includes mock CSRF sequences, invalid configs, synthetic multi-city switches,
-queue changes, initial deployments, retry/deduplication, and public
+queue changes, regional name-boundary matching, initial deployments,
+retry/deduplication, and public
 checkpoint safety checks.
 
 This is not a live-source acceptance test. The new POWER_CONFIG_JSON secret
