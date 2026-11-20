@@ -178,3 +178,102 @@ def test_provider_specific_queue_catalog_and_overlapping_identifiers(tmp_path,mo
     raw=path.read_text(encoding="utf-8")
     assert "GROUP1" not in raw and "GROUP10" not in raw
     assert state_read(path)==state
+
+
+
+def test_csrf_cookie_bootstrap_and_masked_header(monkeypatch):
+    import asyncio
+    import base64
+    from urllib.parse import quote
+    import provider_transport
+
+    raw_token = "abcdefghijklmnopqrstuvwxyz012345"
+    cookie = quote('a:1:{i:1;s:32:"' + raw_token + '";}')
+    responses = []
+
+    class Response:
+        def __init__(self,status,cookies=None,payload=None):
+            self.status_code=status
+            self.cookies=cookies or {}
+            self._payload=payload or {"result":True}
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        def __init__(self,**kwargs):
+            self.cookies=dict(kwargs.get("cookies",{}))
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def post(self,url,data,headers=None):
+            responses.append((data,headers))
+            if headers is None or "X-CSRF-Token" not in headers:
+                self.cookies["_csrf-example"]=cookie
+                return Response(400,{"_csrf-example":cookie})
+            payload=base64.urlsafe_b64decode(headers["X-CSRF-Token"])
+            size=len(payload)//2
+            recovered=bytes(a^b for a,b in zip(
+                payload[:size],payload[size:],strict=True
+            )).decode()
+            assert recovered==raw_token
+            return Response(200,payload={"preset":{},"fact":{}})
+
+    monkeypatch.setattr(provider_transport,"AsyncSession",FakeSession)
+    config=provider_config()
+    result=asyncio.run(provider_transport._request(config,{"method":"checkDisconUpdate"}))
+    assert "preset" in result
+    assert len(responses)==2
+    assert responses[0][0]["method"]=="getHomeNum"
+    assert responses[1][0]["method"]=="checkDisconUpdate"
+
+
+def test_csrf_expired_header_refreshes_once(monkeypatch):
+    import asyncio
+    import provider_transport
+    from urllib.parse import quote
+
+    calls=[]
+    token=quote('i:1;s:32:"abcdefghijklmnopqrstuvwxyz012345"')
+    class Response:
+        def __init__(self,status,cookies=None):
+            self.status_code=status
+            self.cookies=cookies or {}
+        def json(self):return {"result":True}
+
+    class FakeSession:
+        def __init__(self,**kwargs):
+            self.cookies={}
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def post(self,url,data,headers=None):
+            calls.append((data,headers))
+            if headers is None or "X-CSRF-Token" not in headers:
+                self.cookies["_csrf-site"]=token
+                return Response(400,{"_csrf-site":token})
+            if sum(x[1] is not None for x in calls)==1:
+                return Response(400)
+            return Response(200)
+
+    monkeypatch.setattr(provider_transport,"AsyncSession",FakeSession)
+    result=asyncio.run(provider_transport._request(
+        provider_config(),{"method":"checkDisconUpdate"}
+    ))
+    assert result["result"] is True
+    assert len(calls)==4
+
+
+def test_source_rate_limit_never_starts_browser_fallback(monkeypatch):
+    import asyncio
+    import provider_transport
+    invoked=[]
+    async def limited(*args,**kwargs):
+        raise provider_transport.ProviderRateLimit("429")
+    async def browser(*args,**kwargs):
+        invoked.append("browser")
+        raise AssertionError("Do not retry rate-limited provider")
+    monkeypatch.setattr(provider_transport,"_request",limited)
+    monkeypatch.setattr(provider_transport,"browser_cookies",browser)
+    with pytest.raises(provider_transport.ProviderRateLimit):
+        asyncio.run(provider_transport.ajax_post(
+            provider_config(),{"method":"checkDisconUpdate"}
+        ))
+    assert invoked==[]
