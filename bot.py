@@ -1,6 +1,7 @@
 """Automatic outage schedule notifications for one configured home."""
 import asyncio
 import hashlib
+import hmac
 import html
 import json
 import logging
@@ -503,6 +504,15 @@ async def once():
 
     path = Path(os.getenv("STATE_PATH", "data/state.json"))
     state = state_read(path)
+    # Each cloned repository must ignore another home's notification history.
+    # HMAC protects the address identity from straightforward dictionary guesses.
+    identity = hmac.new(
+        token.encode("utf-8"),
+        os.environ["POWER_CONFIG_JSON"].encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if state.get("config:namespace") != identity:
+        state = {"config:namespace": identity}
 
     def persist():
         """Never mutate a real notification checkpoint during a dry run."""
