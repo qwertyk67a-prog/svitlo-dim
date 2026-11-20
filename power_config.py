@@ -58,6 +58,11 @@ def provider_config(*, required=True):
         )
     for key in ("operator", "city_label", "region_label"):
         config[key] = _name(config.get(key), key)
+    state_key = config.get("state_key")
+    if (not isinstance(state_key, str) or len(state_key) < 32
+            or len(state_key) > 256):
+        raise ConfigurationError("state_key must contain at least 32 characters")
+    config["state_key"] = state_key
     for key in ("site_url", "ajax_url", "telegram_feed"):
         config[key] = _https_url(config.get(key), key)
     host = urlparse(config["site_url"]).hostname

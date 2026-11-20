@@ -5,6 +5,7 @@ import pytest
 TEST_CONFIG = {
     "adapter": "ajax_v1",
     "operator": "ПрикладЕнерго",
+    "state_key": "synthetic-repository-checkpoint-key-not-a-secret",
     "site_url": "https://grid.example.invalid/schedule",
     "ajax_url": "https://grid.example.invalid/ajax",
     "telegram_feed": "https://t.me/s/sample_energy",

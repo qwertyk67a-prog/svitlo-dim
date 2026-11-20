@@ -411,16 +411,46 @@ def collect_notifications(source, group, today, state=None):
     return result
 
 
+def _queue_tokens():
+    """Anonymous reversible identifiers for the finite compatible queue set.
+
+    These are deterministic HMAC pseudonyms, not encryption of the state.
+    """
+    cfg = provider_config()
+    return {
+        f"GPV{first}.{second}": "Q" + hmac.new(
+            cfg["state_key"].encode("utf-8"),
+            f"GPV{first}.{second}".encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()[:24]
+        for first in range(1, 7) for second in (1, 2)
+    }
+
+
+def _anonymize_state(serialized):
+    for group, opaque in _queue_tokens().items():
+        serialized = serialized.replace(group, opaque)
+    return serialized
+
+
+def _restore_state(serialized):
+    for group, opaque in _queue_tokens().items():
+        serialized = serialized.replace(opaque, group)
+    return serialized
+
+
 def state_read(path):
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(_restore_state(path.read_text(encoding="utf-8")))
 
 
 def state_write(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8")
+    temp.write_text(_anonymize_state(json.dumps(
+        data, ensure_ascii=False, sort_keys=True, indent=2,
+    )), encoding="utf-8")
     temp.replace(path)
 
 
@@ -509,7 +539,7 @@ async def once():
     # Each cloned repository must ignore another home's notification history.
     # HMAC protects the address identity from straightforward dictionary guesses.
     identity = hmac.new(
-        token.encode("utf-8"),
+        config["state_key"].encode("utf-8"),
         os.environ["POWER_CONFIG_JSON"].encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()

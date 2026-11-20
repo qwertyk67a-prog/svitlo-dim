@@ -44,7 +44,7 @@ def setup(monkeypatch,path):
 
 def seed_state(path, content):
     identity = hmac.new(
-        os.environ.get("TELEGRAM_BOT_TOKEN", "").encode("utf-8"),
+        TEST_CONFIG["state_key"].encode("utf-8"),
         os.environ["POWER_CONFIG_JSON"].encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -66,7 +66,7 @@ def test_successful_notification_persisted_when_next_one_fails(tmp_path,monkeypa
     monkeypatch.setattr(bot,"telegram_send",send)
     with pytest.raises(RuntimeError,match="Помилки Telegram"):
         asyncio.run(bot.once())
-    stored=json.loads(state_file.read_text())
+    stored=bot.state_read(state_file)
     day=datetime.now(KYIV).date()
     assert f"{day.isoformat()}:GPV6.2" in stored
     assert f"{(day+timedelta(days=1)).isoformat()}:GPV6.2" not in stored
@@ -142,7 +142,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     assert sum("ПрикладЕнерго оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
     assert any("Черга 5.1" in m and "Графік відключень" in m for m in calls)
     assert any("Черга 6.2" in m and "Графік відключень" in m for m in calls)
-    stored = json.loads(state_file.read_text(encoding="utf-8"))
+    stored = bot.state_read(state_file)
     assert stored["house:groups"] == ["GPV5.1","GPV6.2"]
     assert not stored.get("house:queue_hold")
 
@@ -214,7 +214,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
     with pytest.raises(RuntimeError,match="Помилки Telegram"):
         asyncio.run(bot.once())
     assert any("Графік відключень" in x for x in calls)
-    assert json.loads(state_file.read_text())["house:groups"] == ["GPV6.2"]
+    assert bot.state_read(state_file)["house:groups"] == ["GPV6.2"]
     # The schedule was delivered once; the one-time queue notice is retried.
     monkeypatch.setattr(bot,"telegram_send",
                         lambda _t,_c,text,deadline=None: calls.append(text))
@@ -288,7 +288,7 @@ def test_outage_published_after_it_ended_is_silent(tmp_path,monkeypatch):
     asyncio.run(bot.once())
     asyncio.run(bot.once())
     assert sent == []
-    state=json.loads(path.read_text())
+    state=bot.state_read(path)
     key="2026-11-19:GPV6.2"
     assert state[key]["status"]=="historical_only"
     # The next update adds an ongoing outage. Only that new information matters.

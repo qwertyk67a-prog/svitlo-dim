@@ -22,6 +22,7 @@ Example POWER_CONFIG_JSON schema (SYNTHETIC details only):
 {
   "adapter": "ajax_v1",
   "operator": "ПрикладЕнерго",
+  "state_key": "ENTER_A_UNIQUE_RANDOM_STRING_OF_AT_LEAST_32_CHARACTERS",
   "site_url": "https://grid.example.invalid/schedule",
   "ajax_url": "https://grid.example.invalid/ajax",
   "telegram_feed": "https://t.me/s/sample_energy",
@@ -74,10 +75,11 @@ trigger new queue assignments or false power restoration.
 
 ## State and security
 
-The public bot_state.json checkpoint contains queue identifiers, timetable
-hashes and recent event status. It is not encrypted. A secret-key HMAC
-namespace prevents a clone from reusing a different property's checkpoints.
-It does not encrypt historical commits or current queue identifiers.
+The public bot_state.json checkpoint contains HMAC-pseudonymized queue keys,
+timetable hashes and recent event status. It is not encrypted. The private
+state_key is also used for the HMAC namespace of each repository's property.
+A changed configuration starts a new delivery history. Do not reuse state_key
+between unrelated properties. Previous public Git history is not erased.
 No paid hosting or encryption service has been added.
 
 GitHub Actions scheduling is best-effort; exact five-minute updates and
