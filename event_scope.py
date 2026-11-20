@@ -24,7 +24,7 @@ def _forms(scope, key):
 def _contains(text, words):
     """Match complete locality words, not stems inside a different place name."""
     return any(
-        re.search(r"(?<!\\w)" + re.escape(word) + r"(?!\\w)", text)
+        re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text)
         for word in words if word
     )
 
