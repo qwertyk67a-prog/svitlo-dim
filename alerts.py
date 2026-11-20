@@ -1,8 +1,4 @@
-"""Official DTEK event notices. No address, token or private chat IDs are stored here.
-
-The public DTEK announcement stream is only a REGIONAL indicator.
-House-specific outages require an optional encrypted DTEK_ADDRESS_JSON secret.
-"""
+"""Official regional notices and address events for a configured operator."""
 import hashlib
 import html
 import json
@@ -14,11 +10,10 @@ from zoneinfo import ZoneInfo
 import requests
 from bs4 import BeautifulSoup
 
-LOG = logging.getLogger("dtek-alerts")
+from power_config import provider_config, operator_label, official_site
+from house_reliability import queue_label
+LOG = logging.getLogger("power-alerts")
 KYIV = ZoneInfo("Europe/Kyiv")
-OFFICIAL_URL = "https://t.me/s/dtek_ua"
-DTEK_AJAX = "https://www.dtek-dnem.com.ua/ua/ajax"
-DTEK_SOURCE = "https://www.dtek-dnem.com.ua/ua/shutdowns"
 
 
 def official_posts(page):
@@ -26,7 +21,8 @@ def official_posts(page):
     entries = []
     for post in soup.select(".tgme_widget_message[data-post]"):
         identity = post.get("data-post", "")
-        match = re.fullmatch(r"dtek_ua/(\d+)", identity)
+        slug = provider_config().get("channel_slug")
+        match = re.fullmatch(re.escape(slug) + r"/(\d+)", identity)
         if not match:
             continue
         content = post.select_one(".tgme_widget_message_text")
@@ -43,13 +39,13 @@ def official_posts(page):
             "id": int(match.group(1)),
             "date": stamp.astimezone(KYIV),
             "text": content.get_text("\n", strip=True),
-            "url": f"https://t.me/dtek_ua/{match.group(1)}",
+            "url": "https://t.me/" + slug + "/" + match.group(1),
         })
     return sorted(entries, key=lambda p: p["id"])
 
 
 def regional_event(post):
-    """Only direct operational announcements from the official DTEK channel.
+    """Only direct operational announcements from the official provider channel.
 
     A regional headline is insufficient if the text identifies another town.
     Territorial relevance is checked independently by coverage_for_house().
@@ -58,14 +54,19 @@ def regional_event(post):
     if not lines:
         return None
     title = re.sub(r"^[^А-Яа-яІіЇїЄєҐґ]+", "", lines[0]).strip().casefold()
-    target = re.match(
-        r"^(дніпропетровщина|дніпропетровська область|кривий ріг|"
-        r"україна|укренерго|дтек|"
-        r"[а-яіїєґ][а-яіїєґ\- ]+ район|[0-9 ]+ квартал)\s*:",
-        title,
+    cfg = provider_config()
+    area_forms = tuple(cfg["city_forms"]) + tuple(cfg["region_forms"])
+    prefixes = area_forms + tuple(cfg["headline_prefixes"]) + (
+        "україна", "укренерго",
     )
-    # Official DTEK also publishes direct headlines starting with the
-    # Ukrenergo order rather than an area prefix.
+    # A place headline is recognized only when present in private settings.
+    prefix_pattern = "|".join(
+        re.escape(word) for word in sorted(prefixes, key=len, reverse=True)
+    )
+    target = re.match(
+        rf"^({prefix_pattern}|[а-яіїєґ][а-яіїєґ\- ]+ район|"
+        rf"[0-9 ]+ квартал)\s*:", title,
+    )
     order = re.match(
         r"^за\s+(?:командою|наказом|розпорядженням)\s+"
         r"(?:нек\s+)?укренерго\b", title,
@@ -73,11 +74,9 @@ def regional_event(post):
     if not target and not order:
         return None
     context = " ".join(lines[:3]).casefold()[:650]
-    if order and not re.search(
-        r"дніпропетровськ|дніпропетровщ|крив\w*\s+р\w*|"
-        r"по\s+всій\s+україн\w*|в\s+усіх\s+областях",
-        context,
-    ):
+    if order and not any(
+        name in context for name in area_forms
+    ) and not re.search(r"по\s+всій\s+україн\w*|в\s+усіх\s+областях", context):
         return None
     restore_gpv = bool(re.search(
         r"(?:переходимо|повертаємось|повертаємося|перейшли|повернулися)\s+"
@@ -115,22 +114,24 @@ def regional_event(post):
     else:
         return None
     area = target.group(1) if target else ""
-    if area == "кривий ріг" or (order and "крив" in context):
-        area_label = "Кривий Ріг"
-    elif area in ("дніпропетровщина", "дніпропетровська область") or (
-        order and re.search(r"дніпропетровськ|дніпропетровщ", context)
-    ):
-        area_label = "Дніпропетровська область"
+    if area in cfg["city_forms"] or (order and any(
+            item in context for item in cfg["city_forms"])):
+        label = cfg["city_label"]
+    elif area in cfg["region_forms"] or (order and any(
+            item in context for item in cfg["region_forms"])):
+        label = cfg["region_label"]
     elif area in ("україна", "укренерго") or order:
-        area_label = "Україна"
+        label = "Україна"
     else:
-        area_label = area.capitalize() if area else "ДТЕК"
+        label = area.capitalize() if area else cfg["operator"]
     return {
-        "kind": kind, "status": status, "area": area_label,
-        "post": post, "operator": "ДТЕК", "source": post["url"],
+        "kind": kind, "status": status, "area": label,
+        "post": post, "operator": cfg["operator"], "source": post["url"],
     }
 
+
 def regional_message(event, changed=False):
+    op = html.escape(operator_label())
     kind = event["kind"]
     active = event["status"] == "active"
     area = event["area"]
@@ -145,16 +146,16 @@ def regional_message(event, changed=False):
         body = ("Погодинний графік може бути неактуальним." if active else
                 "Оновлення стосується аварійного режиму, а не гарантії наявності світла.")
     else:
-        title = ("⚠️ <b>ДТЕК повідомив про знеструмлення</b>" if active else
-                 "✅ <b>ДТЕК повідомив про відновлення електропостачання на території</b>")
+        title = (f"⚠️ <b>{op} повідомив про знеструмлення</b>" if active else
+                 f"✅ <b>{op} повідомив про відновлення електропостачання на території</b>")
         body = ("Відключення можуть відбуватися поза погодинним графіком." if active else
                 "Це повідомлення про територію, а не підтвердження відновлення у будинку.")
 
     if changed == "publication" and active:
-        title = "🔄 <b>ДТЕК змінив офіційне повідомлення</b>"
+        title = f"🔄 <b>{op} змінив офіційне повідомлення</b>"
         body = "Змінено текст першоджерела. Час відключення міг залишитися незмінним."
     elif changed and active:
-        title = "🔄 <b>ДТЕК уточнив строки відключення</b>"
+        title = f"🔄 <b>{op} уточнив строки відключення</b>"
         body = "Офіційні дані про час події оновлено."
     coverage = event.get("coverage") or {}
     label = html.escape(coverage.get("label") or area)
@@ -162,11 +163,11 @@ def regional_message(event, changed=False):
         f"Зазначена територія: {label}. "
         "Будинок розташований у цій території."
         if coverage.get("level") != "house" else
-        "ДТЕК прямо зазначив цей будинок."
+        f"{op} прямо зазначив цей будинок."
     )
     if not active:
         uncertainty = (
-            "За повідомленням ДТЕК, попередній режим для території завершено. "
+            f"За повідомленням {op}, попередній режим для території завершено. "
             "Це не підтверджує наявність електроенергії у кожному будинку."
         )
     elif coverage.get("level") == "house":
@@ -176,7 +177,7 @@ def regional_message(event, changed=False):
         )
     elif coverage.get("partial"):
         uncertainty = (
-            "ДТЕК повідомляє про часткове знеструмлення на території. "
+            f"{op} повідомляє про часткове знеструмлення на території. "
             "Невідомо, чи зачепило відключення конкретний будинок."
         )
     else:
@@ -198,7 +199,7 @@ def regional_message(event, changed=False):
         f"Офіційне повідомлення опубліковано: {reported}.",
         *times, body,
         "Це повідомлення не підтверджує відключення кожної квартири.",
-        f'<a href="{html.escape(event["post"]["url"], quote=True)}">Офіційне повідомлення ДТЕК</a>',
+        f'<a href="{html.escape(event["post"]["url"], quote=True)}">Офіційне повідомлення {html.escape(operator_label())}</a>',
     ))
 
 
@@ -215,11 +216,11 @@ def published_event_end(post):
         r"\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})",
         text,
     )
-    return parse_dtek_date(raw.group(1)) if raw else None
+    return parse_provider_date(raw.group(1)) if raw else None
 
 
 def published_event_start(post):
-    """Return a start only when DTEK supplied a complete date and time."""
+    """Return a start only when provider supplied a complete date and time."""
     text = post["text"].casefold()
     match = re.search(
         r"(?:початок|розпочат\w*|з\s+)\s*[:—–\-]?\s*"
@@ -227,7 +228,7 @@ def published_event_start(post):
         r"\d{2}:\d{2}\s+\d{2}\.\d{2}\.\d{4})",
         text,
     )
-    return parse_dtek_date(match.group(1)) if match else None
+    return parse_provider_date(match.group(1)) if match else None
 
 
 def event_record(event, now):
@@ -251,18 +252,16 @@ def event_record(event, now):
         "post_id": post["id"],
         "content_hash": event.get("content_hash"),
         "revision": fingerprint(revision),
-        "operator": "ДТЕК",
-        "source": post["url"],
+        "source": hashlib.sha256(post["url"].encode("utf-8")).hexdigest()[:20],
         "published": post["date"].isoformat(),
         "detected": now.isoformat(),
         "start": start.isoformat() if start else None,
         "end": finish.isoformat() if finish else None,
-        "area": event["area"],
-    }
+     }
 
 
 def region_candidates(page, state, now, scope=None):
-    """Evaluate separately published DTEK events and previously edited posts.
+    """Evaluate separately published provider events and previously edited posts.
 
     Each new significant announcement is examined in publication order.
     A cancellation already visible in the same batch suppresses obsolete
@@ -271,7 +270,7 @@ def region_candidates(page, state, now, scope=None):
     """
     posts = official_posts(page)
     if not posts:
-        raise RuntimeError("Не вдалося прочитати офіційний канал ДТЕК")
+        raise RuntimeError("Офіційний канал недоступний")
     from event_scope import coverage_for_house
 
     old_id = state.get("official:last_id")
@@ -409,7 +408,7 @@ def region_candidates(page, state, now, scope=None):
 
 def fetch_official_page():
     response = requests.get(
-        OFFICIAL_URL, timeout=22,
+        provider_config()["telegram_feed"], timeout=22,
         headers={"User-Agent": "Mozilla/5.0 (compatible; SVITLO/1.0)"},
     )
     response.raise_for_status()
@@ -420,7 +419,7 @@ def normalized_house(value):
     """Preserve house-number separators: 1/1 is NOT house 11."""
     text = re.sub(r"\s+", "", str(value)).casefold().replace("\\", "/")
     text = text.replace("a", "а").replace("b", "в").replace("i", "і")
-    # DTEK commonly spells a letter suffix with or without a dash.
+    # provider commonly spells a letter suffix with or without a dash.
     return re.sub(r"(?<=\d)-(?=[а-яіїєґ])", "", text)
 
 
@@ -431,12 +430,12 @@ def address_fields(secret):
     try:
         raw = json.loads(secret)
     except (ValueError, TypeError):
-        raise RuntimeError("Некоректний формат DTEK_ADDRESS_JSON")
+        raise RuntimeError("Некоректний формат POWER_CONFIG_JSON")
     if not isinstance(raw, dict):
-        raise RuntimeError("DTEK_ADDRESS_JSON повинен містити об'єкт")
+        raise RuntimeError("POWER_CONFIG_JSON повинен містити об'єкт")
     fields = [raw.get(k) for k in ("city", "street", "house")]
     if any(not isinstance(v, str) or not v.strip() or len(v) > 160 for v in fields):
-        raise RuntimeError("DTEK_ADDRESS_JSON: обов'язкові поля city/street/house")
+        raise RuntimeError("POWER_CONFIG_JSON: обов'язкові поля city/street/house")
     return fields
 
 
@@ -444,7 +443,7 @@ def get_house_entry(response, house):
     matches = [(key, e) for key, e in response.houses.items()
                if normalized_house(key) == normalized_house(house)]
     if not matches:
-        # A slash or a dot directly BEFORE a letter suffix is a DTEK
+        # A slash or a dot directly BEFORE a letter suffix is a provider
         # spelling variant. Numeric slash components (1/1) are NEVER
         # ignored: they can denote a different legal building.
         def letter_suffix_alias(value):
@@ -458,7 +457,7 @@ def get_house_entry(response, house):
         ]
         if len(alternatives) == 1:
             LOG.warning(
-                "Адресний довідник ДТЕК: знайдено один варіант написання "
+                "Адресний довідник постачальника: знайдено один варіант написання "
                 "номера з роздільником перед літерою; перевірте адресу "
                 "на офіційному сайті."
             )
@@ -472,51 +471,25 @@ def get_house_entry(response, house):
             rough(key) == rough(house) for key in response.houses
         )
         LOG.warning(
-            "Адресний довідник ДТЕК: записів=%d, точних збігів=%d, "
+            "Адресний довідник постачальника: записів=%d, точних збігів=%d, "
             "лише приблизних збігів=%d",
             len(response.houses), len(matches), similar_count,
         )
-        raise RuntimeError("Будинок не знайдено однозначно в ДТЕК")
+        raise RuntimeError("Адресу не знайдено однозначно в довіднику")
     entry = matches[0][1]
     # An empty record can mean none; but only in a successfully parsed response.
     return entry
 
 
 async def fetch_address_status(secret):
-    """Use private address only for DTEK address lookup, never regional schedule."""
-    from curl_cffi.requests import AsyncSession
-    from dtek_client import DtekClient
-    from dtek_client.browser_auth import get_cleared_cookies
-
+    """Read one private address through the selected compatible adapter."""
+    from provider_transport import get_homes
     city, street, house = address_fields(secret)
-
-    async def read(client):
-        response = await client.get_home_num(city, street)
-        return get_house_entry(response, house)
-
-    try:
-        async with DtekClient("dnem", ajax_url=DTEK_AJAX) as client:
-            return await read(client)
-    except Exception as ex:
-        LOG.warning("Прямий адресний запит відхилено (%s). Пробую браузер.",
-                    type(ex).__name__)
-        cookies, csrf = await get_cleared_cookies(DTEK_SOURCE)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Origin": "https://www.dtek-dnem.com.ua",
-            "Referer": DTEK_SOURCE,
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        if csrf:
-            headers["X-CSRF-Token"] = csrf
-        session = AsyncSession(timeout=20, cookies=cookies, headers=headers,
-                               impersonate="chrome120")
-        async with DtekClient("dnem", ajax_url=DTEK_AJAX, session=session) as client:
-            return await read(client)
+    response = await get_homes(provider_config(), city, street)
+    return get_house_entry(response, house)
 
 
-def parse_dtek_date(raw):
+def parse_provider_date(raw):
     if not raw:
         return None
     for pattern in ("%d.%m.%Y %H:%M", "%H:%M %d.%m.%Y", "%d.%m.%Y"):
@@ -554,16 +527,17 @@ def address_message(event, changed=False, now=None):
     The official address entry does not provide actual voltage telemetry.
     The detection time is NOT asserted to be the publication time.
     """
+    op = html.escape(operator_label())
     titles = {
         "repair": "🛠 <b>Планові ремонтні роботи</b>",
-        "fault": "‼️ <b>Аварійне відключення за даними ДТЕК</b>",
-        "unclassified": "⚠️ <b>Повідомлення ДТЕК про відключення</b>",
+        "fault": f"‼️ <b>Аварійне відключення за даними {op}</b>",
+        "unclassified": f"⚠️ <b>Повідомлення {op} про відключення</b>",
     }
     title = ("🔄 <b>Оновлено дані щодо відключення</b>" if changed
              else titles[event["category"]])
     lines = [title]
-    start = parse_dtek_date(event["start"])
-    finish = parse_dtek_date(event["end"])
+    start = parse_provider_date(event["start"])
+    finish = parse_provider_date(event["end"])
     # A date without a clock time does not establish an exact start moment.
     has_exact_start = bool(re.fullmatch(
         r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["start"]
@@ -572,7 +546,7 @@ def address_message(event, changed=False, now=None):
                            start < now and (not finish or finish > now))
     if already_started:
         lines.append(
-            "⚠️ За даними ДТЕК, зазначений час початку вже минув. "
+            f"⚠️ За даними {op}, зазначений час початку вже минув. "
             "Відключення могло початися до отримання цього повідомлення."
         )
     if event["start"]:
@@ -583,28 +557,28 @@ def address_message(event, changed=False, now=None):
     else:
         lines.append("Орієнтовний час відновлення не зазначено.")
     if event["category"] == "repair":
-        lines.append("Причина: планові роботи (за даними ДТЕК).")
+        lines.append(f"Причина: планові роботи (за даними {op}).")
     elif event["category"] == "fault":
-        lines.append("Причина за ДТЕК: аварійне відключення.")
+        lines.append(f"Причина за {op}: аварійне відключення.")
     if now:
         lines.append("Інформацію виявлено: " +
                      now.astimezone(KYIV).strftime("%d.%m.%Y %H:%M") + ".")
     lines.append("Бот не вимірює фактичну наявність електроенергії.")
-    lines.append(f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>')
+    lines.append(f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>')
     return "\n".join(lines)
 
 
 def address_clear_message(old, now):
     # Store only the end time publicly. Never persist the private reason
     # or the original address response in bot_state.json.
-    end = parse_dtek_date(old.get("end"))
+    end = parse_provider_date(old.get("end"))
     if end is None or now >= end:
         return None  # Normal disappearance after predicted end: no extra noise.
     return "\n".join((
         "✅ <b>Інформацію про позаграфікове відключення знято</b>",
         "Раніше оголошене відключення більше не відображається за адресою.",
         "Це не підтверджує фактичну наявність світла.",
-        f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>',
+        f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
     ))
 
 
@@ -617,23 +591,23 @@ def address_decision(entry, state, now, expected=None):
     old = state.get(key)
     event = address_event(entry)
     old_active = isinstance(old, dict) and old.get("status") == "active"
-    old_end = parse_dtek_date(old.get("end")) if old_active else None
+    old_end = parse_provider_date(old.get("end")) if old_active else None
     # A date without a clock time is NOT evidence of an ended event.
     exact_end = bool(event and re.fullmatch(
         r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|"
         r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["end"]
     ))
-    finish = parse_dtek_date(event["end"]) if exact_end else None
+    finish = parse_provider_date(event["end"]) if exact_end else None
     if event and finish and finish <= now:
         if old_active and old_end and old_end > now:
-            # DTEK explicitly revised the estimate to a time already past.
+            # provider explicitly revised the estimate to a time already past.
             # This is an early schedule correction, not voltage telemetry.
             message = "\n".join((
-                "🔄 <b>ДТЕК уточнив орієнтовний час завершення</b>",
+                f"🔄 <b>{html.escape(operator_label())} уточнив орієнтовний час завершення</b>",
                 "Нове орієнтовне завершення: " + html.escape(event["end"]),
                 "Зазначений час уже минув.",
                 "Фактичне відновлення електроенергії в будинку не підтверджено.",
-                f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>',
+                f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
             ))
             result.append(("address", key, {
                 "status": "expired", "end": event["end"],
@@ -666,12 +640,12 @@ def address_decision(entry, state, now, expected=None):
     if (previous is not None and previous != current) or (
         previous is None and current and expected and expected not in current
     ):
-        label = ", ".join(x.removeprefix("GPV") for x in current)
+        label = ", ".join(queue_label(x) for x in current)
         text = (
-            "⚠️ <b>ДТЕК змінив чергу за адресою</b>\n"
+            f"⚠️ <b>{html.escape(operator_label())} змінив чергу за адресою</b>\n"
             f"Наразі вказані черги: {html.escape(label or 'не визначено')}.\n"
             "Перевірте актуальність автоматичних повідомлень за цією адресою.\n"
-            f'<a href="{DTEK_SOURCE}">Джерело: ДТЕК</a>'
+            f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>'
         )
         result.append(("address", "address:groups", current, text))
     if previous is None:

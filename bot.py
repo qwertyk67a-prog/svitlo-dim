@@ -1,6 +1,7 @@
-"""Automatic DTEK outage schedule notifications to Telegram."""
+"""Automatic outage schedule notifications for one configured home."""
 import asyncio
 import hashlib
+import hmac
 import html
 import json
 import logging
@@ -15,12 +16,13 @@ from zoneinfo import ZoneInfo
 import requests
 
 KYIV = ZoneInfo("Europe/Kyiv")
-SOURCE = "https://www.dtek-dnem.com.ua/ua/shutdowns"
-LOG = logging.getLogger("dtek-bot")
+from power_config import provider_config, operator_label, official_site, address_json, checkpoint_namespace
+from house_reliability import queue_label
+LOG = logging.getLogger("outage-bot")
 
 
 def time_range(label):
-    """Parse DTEK hourly '00-01' and minute-precision '00:00–01:00' slots."""
+    """Parse provider hourly '00-01' and minute-precision '00:00–01:00' slots."""
     source = str(label).strip()
     source = re.sub(r"\s+", "", source).replace("–", "-").replace("—", "-")
     hourly = re.fullmatch(r"(\d{1,2})-(\d{1,2})", source)
@@ -28,7 +30,7 @@ def time_range(label):
         start_hour, end_hour = map(int, hourly.groups())
         if 0 <= start_hour < 24 and start_hour < end_hour <= 24:
             return start_hour * 60, end_hour * 60
-        raise ValueError(f"Неверный часовой интервал ДТЭК: {label}")
+        raise ValueError(f"Неверный часовой интервал постачальник: {label}")
     minute = re.fullmatch(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", source)
     if not minute:
         raise ValueError(f"Неверная подпись времени: {label}")
@@ -43,7 +45,7 @@ def time_range(label):
 
 def intervals(slots, labels):
     if not slots or not labels:
-        raise RuntimeError("Нет достоверных интервалов ДТЭК")
+        raise RuntimeError("Нет достоверных интервалов постачальник")
     spans = []
     unknown = 0
     for key, status in slots.items():
@@ -179,7 +181,7 @@ def upcoming_signature(day, spans, observed_at):
 
 
 def newly_current_schedule_outage(day, spans, previous, observed_at):
-    """A DTEK-confirmed slot covers NOW but prior published plan did not.
+    """A provider-confirmed slot covers NOW but prior published plan did not.
 
     This is a statement about the SCHEDULE, never voltage at the house.
     """
@@ -208,15 +210,15 @@ def day_message(day, group, spans, updated=None, event="new", previous=None,
     }
     lines = [
         titles[event],
-        f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
-        "✅ <b>Добовий графік ДТЕК має пріоритет</b> над попереднім "
+        f"📅 {day:%d.%m.%Y} · Черга {html.escape(queue_label(group))}",
+        f"✅ <b>Добовий графік {html.escape(operator_label())} має пріоритет</b> над попереднім "
         "тижневим прогнозом на цю дату.",
     ]
     if newly_current_schedule_outage(day, spans, previous, observed_at):
         lines.extend([
             "",
             "⚠️ <b>За оновленим графіком час відключення вже настав.</b>",
-            "ДТЕК міг повідомити про зміну пізніше фактичного початку.",
+            "оператор міг повідомити про зміну пізніше фактичного початку.",
             "Графік не підтверджує стан електропостачання конкретної квартири.",
         ])
     if event == "changed":
@@ -239,7 +241,7 @@ def day_message(day, group, spans, updated=None, event="new", previous=None,
         lines.append(f"⏱ Можливі відключення за добу: <b>{minutes_text(possible_minutes)}</b>")
     if updated:
         lines.append("\nОновлено: " + html.escape(str(updated)))
-    lines.append(f'<a href="{SOURCE}">Джерело: ДТЕК</a>')
+    lines.append(f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>')
     return "\n".join(lines)
 
 
@@ -247,20 +249,20 @@ def cancellation_message(day, group, updated=None, remaining_today=False):
     """Cancellation is a meaningful change only after a prior outage notice."""
     lines = [
         "✅ <b>Планові відключення скасовано</b>",
-        f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
+        f"📅 {day:%d.%m.%Y} · Черга {html.escape(queue_label(group))}",
         "",
         ("На решту дня відключення за оновленим графіком не заплановані."
          if remaining_today else "За оновленим графіком планових відключень немає."),
     ]
     if updated:
         lines.append("\nОновлено: " + html.escape(str(updated)))
-    lines.append(f'<a href="{SOURCE}">Джерело: ДТЕК</a>')
+    lines.append(f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>')
     return "\n".join(lines)
 
 
 def weekly_message(monday, group, entries, changed=False,
                    observed_at=None, confirmed_days=()):
-    """Show only relevant weekly preview days not covered by DTEK daily facts.
+    """Show only relevant weekly preview days not covered by provider daily facts.
 
     This is PRESENTATION ONLY: weekly candidate fingerprints remain based on
     the original seven-day forecast, so the passage of midnight never causes
@@ -279,7 +281,7 @@ def weekly_message(monday, group, entries, changed=False,
     lines = [
         "🔄 <b>Тижневий прогноз змінено</b>" if changed else
         "📆 <b>Тижневий прогноз можливих відключень</b>",
-        f"Черга {html.escape(group.removeprefix('GPV'))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
+        f"Черга {html.escape(queue_label(group))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
     ]
     weekdays = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд")
     for day, spans in visible:
@@ -288,9 +290,9 @@ def weekly_message(monday, group, entries, changed=False,
     lines.append(
         "\n⚠️ Попередній прогноз можливих відключень. "
         "Минулі дати та дні з підтвердженим добовим графіком не показані. "
-        "Для таких днів використовуйте окремий добовий графік ДТЕК."
+        f"Для таких днів використовуйте окремий добовий графік {html.escape(operator_label())}."
     )
-    lines.append(f'<a href="{SOURCE}">Джерело: ДТЕК</a>')
+    lines.append(f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>')
     return "\n".join(lines)
 
 
@@ -299,10 +301,10 @@ def weekly_cancellation_message(monday, group):
     sunday = monday + timedelta(days=6)
     return "\n".join([
         "✅ <b>Тижневий прогноз відключень скасовано</b>",
-        f"Черга {html.escape(group.removeprefix('GPV'))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
+        f"Черга {html.escape(queue_label(group))} · {monday:%d.%m}–{sunday:%d.%m.%Y}",
         "",
         "У оновленій тижневій таблиці планових відключень немає.",
-        f'<a href="{SOURCE}">Джерело: ДТЕК</a>',
+        f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
     ])
 
 
@@ -354,7 +356,7 @@ def collect_notifications(source, group, today, state=None):
     state = state or {}
     labels = source.preset.time_zone if source.preset else None
     if not labels:
-        LOG.info("Немає часових інтервалів ДТЕК; публікацій немає")
+        LOG.info("Немає часових інтервалів оператор; публікацій немає")
         return []
 
     actual = {}
@@ -410,16 +412,78 @@ def collect_notifications(source, group, today, state=None):
     return result
 
 
+def _queue_tokens():
+    """Pseudonym mapping from the private queue catalog, not a code constant."""
+    cfg = provider_config()
+    return {
+        group: "Q" + hmac.new(
+            cfg["state_key"].encode("utf-8"),
+            group.encode("utf-8"), hashlib.sha256,
+        ).hexdigest()[:24]
+        for group in cfg["queue_catalog"]
+    }
+
+
+def _map_state_key(key, mapping):
+    """Change only queue components of known checkpoint keys."""
+    if not isinstance(key, str):
+        return key
+    parts = key.split(":")
+    if (len(parts) >= 3 and parts[0] in ("week", "reminder")
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1])):
+        index = 2
+    elif len(parts) >= 2 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[0]):
+        index = 1
+    else:
+        return key
+    if parts[index] not in mapping:
+        return key
+    parts[index] = mapping[parts[index]]
+    return ":".join(parts)
+
+
+def _map_state_values(value, mapping):
+    """Never replace short queue names inside dates, hashes or arbitrary text."""
+    if isinstance(value, dict):
+        return {
+            _map_state_key(key, mapping): _map_state_values(item, mapping)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_map_state_values(item, mapping) for item in value]
+    if isinstance(value, tuple):
+        return [_map_state_values(item, mapping) for item in value]
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    return value
+
+
+def _anonymize_state(key):
+    return _map_state_key(key, _queue_tokens())
+
+
+def _restore_state(serialized):
+    """Compatibility helper for tests that supply a serialized checkpoint."""
+    reverse = {token: group for group, token in _queue_tokens().items()}
+    data = json.loads(serialized)
+    return json.dumps(_map_state_values(data, reverse), ensure_ascii=False)
+
+
 def state_read(path):
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    reverse = {token: group for group, token in _queue_tokens().items()}
+    return _map_state_values(data, reverse)
 
 
 def state_write(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8")
+    public = _map_state_values(data, _queue_tokens())
+    temp.write_text(json.dumps(
+        public, ensure_ascii=False, sort_keys=True, indent=2,
+    ), encoding="utf-8")
     temp.replace(path)
 
 
@@ -464,68 +528,28 @@ def telegram_send(token, chat, text, deadline=None):
 
 
 async def get_schedule(group_ids=None):
-    """Fetch the regional schedule once for all verified queues of one house."""
-    from types import SimpleNamespace
-    from dtek_client import DtekClient
-    from dtek_client.models import FactSchedule, PresetSchedule
-
+    """Read official schedule using the private provider configuration."""
     from house_reliability import verified_house_queues
+    from provider_transport import get_schedule as fetch_schedule
+    config = provider_config()
     if group_ids is None:
-        group = os.getenv("DTEK_GROUP", "").strip()
-        # No default house queue: unverified tracking is permitted only
-        # when an explicit test override is deliberately supplied.
-        if not re.fullmatch(r"[1-6]\.[12]", group):
-            raise RuntimeError("Некоректна черга ДТЕК")
-        group_ids = ("GPV" + group,)
-    else:
-        group_ids = verified_house_queues(group_ids)
-    api_url = "https://www.dtek-dnem.com.ua/ua/ajax"
-
-    async def fetch(client):
-        raw = await client._post({
-            "method": "checkDisconUpdate",
-            "update": "01.01.2000 00:00",
-        })
-        if not isinstance(raw, dict) or not isinstance(raw.get("preset"), dict):
-            raise RuntimeError("ДТЭК не вернул общую таблицу графиков")
-        preset = PresetSchedule.model_validate(raw["preset"])
-        fact_raw = raw.get("fact")
-        fact = FactSchedule.model_validate(fact_raw) if isinstance(fact_raw, dict) else None
-        if not preset.time_zone:
-            raise RuntimeError("ДТЭК не вернул временные интервалы")
-        missing = [group_id for group_id in group_ids
-                   if group_id not in preset.groups and
-                   (not fact or not any(group_id in m for m in fact.days.values()))]
-        if missing:
-            raise RuntimeError("Для підтверджених черг будинку немає регіональних графіків")
-        LOG.info("ДТЕК: Дніпропетровська область, черг у будинку: %d", len(group_ids))
-        return SimpleNamespace(preset=preset, fact=fact), list(group_ids)
-
-    try:
-        async with DtekClient("dnem", ajax_url=api_url) as client:
-            return await fetch(client)
-    except Exception as ex:
-        if os.getenv("DTEK_WAF_BROWSER", "0") != "1":
-            raise
-        LOG.warning("Прямой запрос ДТЭК не выполнен (%s). Пробую браузер.",
-                    type(ex).__name__)
-        from curl_cffi.requests import AsyncSession
-        from dtek_client.browser_auth import get_cleared_cookies
-
-        cookies, csrf = await get_cleared_cookies(SOURCE)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Origin": "https://www.dtek-dnem.com.ua",
-            "Referer": SOURCE,
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest",
-        }
-        if csrf:
-            headers["X-CSRF-Token"] = csrf
-        session = AsyncSession(timeout=20, cookies=cookies, headers=headers,
-                               impersonate="chrome120")
-        async with DtekClient("dnem", ajax_url=api_url, session=session) as client:
-            return await fetch(client)
+        raise RuntimeError("Потрібно підтвердити черги за адресою")
+    group_ids = verified_house_queues(group_ids)
+    source = await fetch_schedule(config)
+    if not source.preset.time_zone:
+        raise RuntimeError("Джерело не повернуло часові інтервали")
+    missing = [
+        group for group in group_ids
+        if group not in source.preset.groups and (
+            not source.fact or not any(
+                group in day for day in source.fact.days.values()
+            )
+        )
+    ]
+    if missing:
+        raise RuntimeError("Джерело не містить графіків підтверджених черг")
+    LOG.info("Перевірено графіки підтверджених черг: %d", len(group_ids))
+    return source, list(group_ids)
 
 
 async def once():
@@ -541,8 +565,15 @@ async def once():
     if not dry_run and (not token or not chat):
         raise RuntimeError("Відсутні TELEGRAM_BOT_TOKEN або TELEGRAM_CHAT_ID")
 
+    # Validate the private configuration before touching any checkpoint.
+    config = provider_config()
     path = Path(os.getenv("STATE_PATH", "data/state.json"))
     state = state_read(path)
+    # Each cloned repository must ignore another home's notification history.
+    # HMAC protects the address identity from straightforward dictionary guesses.
+    identity = checkpoint_namespace(config, token, chat)
+    if state.get("config:namespace") != identity:
+        state = {"config:namespace": identity}
 
     def persist():
         """Never mutate a real notification checkpoint during a dry run."""
@@ -551,8 +582,6 @@ async def once():
 
     now = datetime.now(KYIV)
     today = now.date()
-    selected = os.getenv("DTEK_GROUP", "").strip()
-    group_id = "GPV" + selected if selected else None
     leads = parse_reminder_minutes(os.getenv("REMINDER_MINUTES", "0"))
     trim_state(state, today)
     persist()
@@ -560,17 +589,13 @@ async def once():
     source_problems = []
     sent = 0
 
-    # A DTEK address may have multiple queues. Never infer assignments
-    # from a fixed house queue; use only verified address data.
+    # Queue assignments come only from the official address response.
     house = None
     house_groups = None
     queue_change = None
     regional_scope = None
-    private_address = os.getenv("DTEK_ADDRESS_JSON", "").strip()
-    allow_unverified = os.getenv("ALLOW_UNVERIFIED_GROUP", "false").lower() == "true"
-    if not private_address and not allow_unverified:
-        LOG.warning("Адресу ДТЕК не налаштовано; невизначену чергу не публікуємо")
-        raise RuntimeError("Потрібен DTEK_ADDRESS_JSON; непідтверджена черга заборонена")
+    provider_config()
+    private_address = address_json()
     if private_address:
         try:
             from alerts import fetch_address_status
@@ -644,7 +669,7 @@ async def once():
         try:
             from alerts import address_decision
             for _channel, key, value, message in address_decision(
-                    house, state, now, expected=group_id):
+                    house, state, now):
                 if key == "address:groups":
                     # Only house_queue_transition owns this state key.
                     continue
@@ -655,13 +680,11 @@ async def once():
     try:
         if house_groups is not None:
             source, groups = await get_schedule(house_groups)
-        elif allow_unverified and not private_address:
-            source, groups = await get_schedule()
         else:
             source, groups = None, []
     except Exception as exc:
-        LOG.error("Графік ДТЕК недоступний: %s", type(exc).__name__)
-        source_problems.append("dtek_schedule")
+        LOG.error("Графік оператор недоступний: %s", type(exc).__name__)
+        source_problems.append("provider_schedule")
         source, groups = None, []
 
     # If an official emergency/GAV regime remains active, the daily GPV
@@ -700,7 +723,7 @@ async def once():
                     old_visible = upcoming_spans(day, old_spans, now)
                     next_state["spans"] = [list(span) for span in spans]
 
-                    # DTEK only published already-ended slots for today:
+                    # provider only published already-ended slots for today:
                     # do not announce an incident that is over.
                     if day == today and not new_visible and not old_visible:
                         next_state["status"] = "historical_only"
@@ -717,7 +740,7 @@ async def once():
                         )
                         priority = 2
                     else:
-                        # DTEK may edit only an already-ended time range.
+                        # provider may edit only an already-ended time range.
                         # That is not a change to the remaining plan.
                         if (day == today and old_spans is not None and
                                 upcoming_signature(day, old_spans, now) ==
@@ -784,14 +807,14 @@ async def once():
                 if message:
                     if house_groups is not None and len(house_groups) > 1:
                         message += (
-                            "\n⚠️ Для будинку ДТЕК вказує кілька черг. "
+                            f"\n⚠️ Для будинку {html.escape(operator_label())} вказує кілька черг. "
                             "Цей графік стосується лише зазначеної черги. "
                             "Розподіл квартир між чергами не підтверджено; "
-                            "для будинків зі складним живленням ДТЕК не гарантує прогноз."
+                            f"для будинків зі складним живленням {html.escape(operator_label())} не гарантує прогноз."
                         )
                     if uncertain_gpv and kind in ("day", "week"):
                         message += (
-                            "\n⚠️ ДТЕК повідомляв про аварійний режим на цій території. "
+                            f"\n⚠️ {html.escape(operator_label())} повідомляв про аварійний режим на цій території. "
                             "Поки він діє, погодинний графік може не діяти."
                         )
                     enqueue(priority, key, next_state, message, "schedule")
@@ -818,18 +841,18 @@ async def once():
             persist()
             continue
         if deadline is not None and datetime.now(KYIV) >= deadline:
-            LOG.info("Пропущено прострочене нагадування: %s", key)
+            LOG.info("Пропущено прострочене нагадування: %s", _anonymize_state(key))
             continue
         # Limit to one outgoing Telegram message per second for this one chat.
         delay = 1.05 - (time.monotonic() - last_send) if last_send else 0
         if delay > 0:
             time.sleep(delay)
         if deadline is not None and datetime.now(KYIV) >= deadline:
-            LOG.info("Пропущено прострочене нагадування: %s", key)
+            LOG.info("Пропущено прострочене нагадування: %s", _anonymize_state(key))
             continue
         try:
             if dry_run:
-                LOG.info("DRY-RUN: сформовано сповіщення %s; Telegram не викликано", key)
+                LOG.info("DRY-RUN: сформовано сповіщення %s; Telegram не викликано", _anonymize_state(key))
             else:
                 telegram_send(token, chat, message, deadline=deadline)
         except Exception as exc:
@@ -849,7 +872,7 @@ async def once():
         state[key] = value
         persist()
         sent += 1
-        LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", key)
+        LOG.info("%s: %s", "DRY-RUN" if dry_run else "Надіслано", _anonymize_state(key))
 
     LOG.info("%s: %d; помилок доставки: %d",
              "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",

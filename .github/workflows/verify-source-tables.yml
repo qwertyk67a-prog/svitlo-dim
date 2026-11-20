@@ -1,10 +1,6 @@
-name: Verify official DTEK daily vs weekly tables
+name: Compare source daily and weekly tables
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/verify-dtek-tables.yml
 permissions:
   contents: read
 jobs:
@@ -27,8 +23,7 @@ jobs:
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt','constraints.txt') }}
       - if: steps.chromium-cache.outputs.cache-hit != 'true'
         run: python -m playwright install --with-deps chromium
-      - name: Compare official day and preset for 20 November
+      - name: Compare official tables for each verified queue
         env:
-          DTEK_WAF_BROWSER: "1"
-          DTEK_COMPARE_DATE: "2026-11-20"
-        run: python -m scripts.verify_dtek_tables
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
+        run: python -m scripts.verify_source_tables

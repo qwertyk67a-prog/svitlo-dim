@@ -1,4 +1,4 @@
-name: Verify DTEK house address (no Telegram)
+name: Verify configured address (no Telegram)
 on:
   workflow_dispatch:
 permissions:
@@ -16,9 +16,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m playwright install --with-deps chromium
+      - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        id: chromium-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt', 'constraints.txt') }}
+      - if: steps.chromium-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install --with-deps chromium
       - name: Check queues without posting messages
         env:
-          DTEK_ADDRESS_JSON: ${{ secrets.DTEK_ADDRESS_JSON }}
-          DTEK_WAF_BROWSER: "1"
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
         run: python -m scripts.verify_address

@@ -18,7 +18,7 @@ def main():
     if not isinstance(me, dict) or not me.get("is_bot"):
         raise SetupError("Токен не належить Telegram-боту")
     username = me.get("username") or ""
-    print("Telegram bot: @" + username)
+    print("Telegram bot verified; username withheld from public logs")
     webhook = call_telegram(token, "getWebhookInfo")
     if not isinstance(webhook, dict):
         raise SetupError("Webhook status недоступний")
@@ -56,8 +56,8 @@ def main():
     found = recent_group_commands(updates, username)
     print("Matching /chatid destinations:", len(found))
     if len(found) == 1:
-        print("TELEGRAM_CHAT_ID =", found[0])
-        print("Збережіть ID у Repository secret TELEGRAM_CHAT_ID")
+        print("Знайдено рівно одну групу; ID не друкується у журналі")
+        print("Запустіть Connect Telegram bot у режимі discover для отримання ID")
     elif not found:
         print("Групова команда не надійшла. Повторіть точну /chatid@ім'я_бота "
               "після діагностики та запустіть discover")

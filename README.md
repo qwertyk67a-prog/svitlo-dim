@@ -1,158 +1,104 @@
-# SVITLO — домовий Telegram-бот
+# Power-outage monitor: one property, one Telegram destination
+
+This is a reusable public repository. Real addresses, company endpoints,
+city/region names and official channel identifiers belong only in Secrets.
+
+## Provider protocol
+
+The ajax_v1 adapter understands a particular form-encoded schedule API.
+Other energy suppliers may use different schemas. Changing just a URL is
+NOT proof of compatibility. Add and test a new adapter before activation.
+Unknown providers fail closed.
+
+## Required GitHub Actions Repository Secrets
+
+POWER_CONFIG_JSON: all operator, source and property settings (example below).
+TELEGRAM_BOT_TOKEN: a bot token from BotFather.
+TELEGRAM_CHAT_ID: a Telegram group or channel ID.
+
+Example POWER_CONFIG_JSON schema (SYNTHETIC details only):
+
+~~~json
+{
+  "adapter": "ajax_v1",
+  "operator": "ПрикладЕнерго",
+  "queue_catalog": ["EXAMPLE_1", "EXAMPLE_2"],
+  "queue_display_prefix": "EXAMPLE_",
+  "state_key": "REPLACE_WITH_64_RANDOM_HEX_CHARACTERS",
+  "site_url": "https://grid.example.invalid/schedule",
+  "ajax_url": "https://grid.example.invalid/ajax",
+  "telegram_feed": "https://t.me/s/sample_energy",
+  "city_label": "Зелений Бір",
+  "city_forms": ["зелений бір", "зеленого бору", "зеленому борі"],
+  "region_label": "Прикладна область",
+  "region_forms": ["прикладщина", "прикладна область", "прикладній області", "прикладної області"],
+  "headline_prefixes": ["прикладенерго"],
+  "other_places": ["іншоград", "другоград", "південний гай"],
+  "other_regions": ["сусідня область"],
+  "address": {
+    "city": "м. Зелений Бір",
+    "street": "вул. Умовна",
+    "house": "12Г",
+    "district": "Зразковий район",
+    "quarter": "987 квартал"
+  }
+}
+~~~
+
+Replace all values with real details only INSIDE the GitHub Secret.
+The location arrays must contain grammatical forms used in official notices.
+Wrong forms may cause missed or irrelevant announcements.
+The district and quarter are optional. Only city, street and house are sent
+to the provider address API.
+
+Repository variables: BOT_ENABLED=true enables monitoring.
+REMINDER_MINUTES=0 disables reminders by default.
+ANNOUNCEMENTS_ENABLED=true enables official regional announcements.
+
+## Setup
+
+1. Add the full POWER_CONFIG_JSON Repository Secret.
+2. Run Verify configured address (no Telegram).
+3. Run Dry-run source audit (no Telegram).
+4. Run Connect Telegram bot (manual) in test mode.
+5. Check one Telegram test message.
+6. Enable BOT_ENABLED=true and manually run Check power schedule.
+
+One copied repository needs one separate set of Secrets and one destination.
+GitHub does not copy Secrets when cloning a repository. Keep BOT_ENABLED
+disabled until the address, API and test delivery are verified.
+
+## Automatic queue changes
+
+The private queue_catalog lists all valid group IDs for this supplier.
+The queue_display_prefix controls how each ID appears to residents.
+A complete catalog is necessary to restore anonymized checkpoints.
+
+No fixed queue is stored in the production code. The address API returns
+one or several verified queues. Changes are announced relative to the last
+confirmed set, never to a guessed default. Uncertain address data do not
+trigger new queue assignments or false power restoration.
+
+## State and security
+
+The public bot_state.json checkpoint contains HMAC-pseudonymized queue keys,
+timetable hashes and recent event status. It is not encrypted. The private
+state_key is also used for the HMAC namespace of each repository's property.
+A changed configuration starts a new delivery history. Do not reuse state_key
+between unrelated properties. Previous public Git history is not erased.
+No paid hosting or encryption service has been added.
+
+GitHub Actions scheduling is best-effort; exact five-minute updates and
+exactly-once Telegram delivery are not guaranteed.
+
+Generate your individual state_key **locally** using:
+
+~~~bash
+python -c "import secrets; print(secrets.token_hex(32))"
+~~~
+
+Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Never copy an example key. The format validator cannot prove that an accepted key is truly random.
+
+## Before deploying this version
 
-**Один багатоквартирний будинок — один Telegram-чат.** Усі повідомлення мешканцям українською мовою. Без реклами та платних послуг.
-
-## Джерела даних
-
-**Виключно офіційні першоджерела ДТЕК:**
-
-- Адресні дані, черги, добові ГПВ та попередній тижневий графік: https://www.dtek-dnem.com.ua/ua/shutdowns та офіційний API цього домену.
-- Оголошення про екстрені та аварійні режими: офіційний канал групи ДТЕК https://t.me/dtek_ua.
-- `dnipro-svitlo.com.ua` та інші неофіційні сайти **не використовуються** для запитів, резервного отримання даних або визначення статусу.
-- Бібліотека `dtek-blackout-client` — клієнт для запитів до офіційного сайту. Вона не є окремим джерелом відключень.
-
-## Функції
-
-- Визначає за захищеною адресою всі черги електропостачання будинку, якщо ДТЕК їх повертає.
-- Одноразово повідомляє про додавання, заміну або вилучення черги та продовжує спостерігати за всіма чинними чергами.
-- Повідомляє про новий ГПВ на сьогодні й завтра, суттєві зміни, скасування раніше оголошених відключень.
-- Розрізняє попередній тижневий прогноз і підтверджений добовий графік. Тижневий прогноз не потребує наявності добового графіка.
-- Показує лише актуальні/майбутні інтервали сьогодні та сумарну тривалість за **всю добу**.
-- Перевіряє офіційні регіональні повідомлення ДТЕК про екстрені режими та ГАВ.
-- За наявності даних ДТЕК перевіряє адресні ремонтні роботи й аварійні події.
-- Відстежує зміну офіційного часу завершення та враховує запізнілі повідомлення, якщо подія ще актуальна.
-- Не оголошує повернення світла через зникнення адресного запису, завершення приблизного часу або відсутність даних.
-- Не публікує нічого, коли даних або значущих змін немає.
-- Додаткове нагадування за 5/15/30/60 хвилин за замовчуванням **ВИМКНЕНО**.
-
-> **Статус:** чиста копія коду. Автоматична відправка **ВИМКНЕНА** до `BOT_ENABLED=true`. Ні ручний запуск workflow, ні cron не надсилає повідомлення, поки ця змінна не увімкнена. Початкові старі стани повідомлень не перенесено.
-
-## Приватні налаштування
-
-Перейдіть до **Settings → Secrets and variables → Actions**.
-
-**Repository secrets** — значення доступні лише під час запуску GitHub Actions:
-
-| Secret | Призначення |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Токен поточного бота з @BotFather |
-| `TELEGRAM_CHAT_ID` | ID Telegram-групи або каналу будинку |
-| `DTEK_ADDRESS_JSON` | Адреса для запиту ДТЕК, тільки в секреті |
-
-Формат приватної адреси (використовуйте офіційне написання міста, вулиці та будинку в довіднику ДТЕК):
-
-```json
-{"city":"НАСЕЛЕНИЙ_ПУНКТ","street":"ВУЛИЦЯ","house":"БУДИНОК"}
-```
-
-**Уточнення для територіальних відключень:** три основні поля потрібні ДТЕК для графіка будинку. Для розпізнавання офіційних повідомлень про **часткові відключення в районі або кварталі** можна додати до того ж самого `DTEK_ADDRESS_JSON` ще два поля: `"district":"НАЗВА РАЙОНУ"` і `"quarter":"НОМЕР КВАРТАЛУ"`. Ці поля **не передаються до адресного API ДТЕК** і не записуються до журналів. Повний опис: [Позаграфікові відключення](docs/unexpected-outages.md).
-
-**Repository variables** — не зберігайте тут адреси чи токени:
-
-| Variable | Початкове значення |
-|---|---|
-| `BOT_ENABLED` | `false` (або не створювати) |
-| `REMINDER_MINUTES` | `0` |
-| `ANNOUNCEMENTS_ENABLED` | `true` |
-| `ALLOW_UNVERIFIED_GROUP` | `false` (тільки для окремих тестів) |
-| `DRY_RUN` | `false` (без викликів Telegram у ручному тесті) |
-
-## Безпечний запуск
-
-1. Перевірте успішне завершення **Actions → Python tests**.
-2. Додайте три секрети в налаштуваннях GitHub, не надсилаючи значень у чат або Issue.
-3. Перевірте, що бот присутній у групі та може надсилати повідомлення.
-4. **Зупиніть старий бот** у попередньому GitHub, інакше прийдуть дублікати. Якщо старий GitHub недоступний, замініть токен того самого бота через BotFather та додайте новий токен сюди.
-5. Увімкніть `BOT_ENABLED=true` лише після перевірки.
-6. Перевірте **Actions → Check DTEK schedule**, журнал роботи й реальні повідомлення.
-
-При першому активному запуску чинні відключення можуть бути надіслані як нові, оскільки стара історія відправок не перенесена.
-
-## Важливі обмеження
-
-GitHub Actions намагається перевіряти ДТЕК кожні 5 хвилин, але GitHub може затримати або пропустити запуск. **Нагадування рівно за 5 хвилин не гарантовано.** Прострочені нагадування відкидаються.
-
-Бот не вимірює фактичну наявність електроенергії. Відсутність адресного запису ДТЕК не підтверджує відновлення світла. Якщо дані ДТЕК неоднозначні, бот не створює хибного повідомлення.
-
-[Правила одного будинку](docs/single-house-reliability.md) · [Безпека](docs/one-house-security.md) · [Приклади повідомлень](docs/notification-examples.md)
-
-
-## Надійність
-
-При тимчасовій помилці адресного API бот використовує лише раніше підтверджені черги з поточного стану. Перевірка офіційних територіальних повідомлень не залежить від доступності адресного API. Без адреси й явного тестового дозволу відправка за резервною чергою заборонена. `DRY_RUN=true` дозволяє перевірити рішення без надсилання, але `STATE_PATH` у такому режимі має вказувати на окремий тестовий файл.
-
-
-## Обробка офіційних оголошень
-
-Бот перевіряє послідовність нових публікацій каналу, а також зміни тексту нещодавніх публікацій. Кожне доставлене сповіщення зберігається окремо як `official:event:<post_id>`. Зміни раніше опублікованого орієнтовного часу враховуються, якщо новий час прямо вказаний. Режим `DRY_RUN` ніколи не викликає Telegram API.
-
-
-## Ручна перевірка без Telegram
-
-Відкрийте **Actions → Dry-run DTEK audit (no Telegram) → Run workflow**. Процес читає офіційні джерела, але **не викликає Telegram API й не записує зміни стану**. Зміни залишаються лише у пам'яті процесу. За відсутності `DTEK_ADDRESS_JSON` тест завершиться помилкою.
-
-## Стан у публічному GitHub
-
-За вимогою власника репозиторій лишається **публічним**. `bot_state.json` залишається в `main`. При конфлікті запису GitHub Actions повторно завантажує `main` і намагається перенести локальний коміт. **У разі конфлікту стан не перезаписується**. Це покращення не усуває можливих повторів у разі успішного надсилання Telegram та невдалого запису стану.
-
-
-## Нагадування
-
-Для вже опублікованих підтверджених суточних ГПВ нагадування можуть надсилатися до чотирьох хвилин після номінального часу нагадування. Повідомлення завжди показує **фактичний залишок хвилин** до планового початку. Після початку відключення нагадування не надсилається. GitHub Actions може пропустити це вікно.
-
-
-## Моніторинг помилок
-
-Недоступність активного офіційного каналу або регіонального графіка призводить до **помилки GitHub Actions**. Інші доступні повідомлення обробляються до завершення запуску. Логи містять лише типи помилок, без токенів чи приватної адреси. Це **сигнал у GitHub Actions**, а не окреме приватне повідомлення адміністратору.
-
-
-Для адрес із кількома підтвердженими чергами повідомлення про ГПВ містить додаткове застереження. Графік черги **не можна вважати точним графіком для кожної квартири**. ДТЕК попереджає, що для будинків зі складним живленням точний прогноз може бути недоступним.
-
-
-## Діагностика адреси
-
-Коли ДТЕК не повертає однозначну адресу, бот відображає у GitHub Actions лише **кількість записів, точних та приблизних збігів**. Реальна вулиця й номер будинку не журналюються. Приблизні збіги **ніколи** не використовуються автоматично. Якщо немає жодної раніше підтвердженої черги, перевірка завершується з помилкою `address_lookup`, а не хибним статусом успіху.
-
-
-Додаткове правило ДТЕК: **один-єдиний** запис із роздільником `/` або `.` безпосередньо перед літерою допускається як варіант написання номера будинку. Наприклад, `42/А` та `42А`. Номери `1/1` та `11` залишаються різними. За наявності двох можливих записів бот припиняє адресну перевірку. Це технічне зіставлення **не є юридичним підтвердженням** тотожності адрес.
-
-
-## Telegram connection: manual onboarding
-
-Use an existing bot if it is still available through @BotFather. A new bot is not required.
-
-1. Save the BotFather token as GitHub Actions **Repository secret TELEGRAM_BOT_TOKEN**. Update the existing secret when present.
-2. Add the bot to the intended Telegram group. Allow it to post messages.
-3. Send /chatid in the Telegram group. Use /chatid@YourBotUsername when needed.
-4. Open GitHub Actions -> Connect Telegram bot (manual) -> Run workflow. Select **discover**.
-5. Read the negative TELEGRAM_CHAT_ID number in the run log. Save it as **Repository secret TELEGRAM_CHAT_ID**. Caution: logs of this public repository are public.
-6. Run the same workflow in **test** mode. It sends exactly one Telegram test message.
-7. Disable the old bot's previous automation to prevent duplicates. Set GitHub **Repository variable BOT_ENABLED** to **true**.
-8. Run **Check DTEK schedule** manually once and check its GitHub Actions log.
-
-Never enter BotFather tokens into ChatGPT, GitHub Issues or publicly visible repository variables. The helper does not change BOT_ENABLED or DTEK data. Discovery reads recent commands; it can fail when a different consumer or a webhook already receives bot updates.
-
-
-## Безпечна діагностика Telegram
-
-Окремий workflow **Diagnose Telegram connection (no messages)** перевіряє getMe, стан webhook та кількість доступних Telegram update. Він не надсилає повідомлень та не друкує токен або вміст повідомлень. За наявності єдиного свіжого /chatid виводить номер групи. Налаштування токена та `BOT_ENABLED` не змінюються.
-
-
-## Вмикання моніторингу: робочий механізм
-
-Раніше умова `if: vars.BOT_ENABLED == 'true'` на рівні job позначала ручний запуск як `Skipped` без діагностики. Тепер окремий перший крок **Validate BOT_ENABLED on the runner** перевіряє цю змінну всередині GitHub runner. Якщо вона точно `true`, решта кроків виконується. Ручний запуск із відсутнім або неправильним значенням завершується явною помилкою. Запланований запуск із вимкненою змінною не відправляє жодних повідомлень і не завантажує залежності. Діагностика `ACTIVATION_DIAGNOSTIC` у workflow Python tests повідомляє лише факт правильного значення, без друку секретів.
-
-
-Встановлено причину пропуску запуску 20.11.2026: `BOT_ENABLED` містив зайвий пробіл. Перший крок тепер приймає значення `true` з пробілами на початку або наприкінці. Значення `false` та будь-який інший текст не активують розсилку.
-
-
-## Приватність черги та географії
-
-Черга будинку **не задана в коді** й не береться з налаштувань `DTEK_GROUP` виробничого workflow. Бот запитує всі підтверджені черги для адреси з секрету `DTEK_ADDRESS_JSON`. `DTEK_GROUP` збережено лише як явний тестовий параметр для ізольованих тестів без адреси. Дані району й кварталу, якщо потрібні, додаються до `DTEK_ADDRESS_JSON` як `district` і `quarter`. Перевірка адреси більше не перевіряє жодного зашитого району чи кварталу.
-
-**Важливо:** `bot_state.json` і Git-історія залишаються публічними. Стан містить ідентифікатори черг та час відключень для контролю дублікатів. Видалення черги з вихідного коду не приховує її з цього файла або старих комітів. Назва ДТЕК та публічні URL/залежність залишаються в коді: приховування назви оператора не захищає персональні дані й шкодить перевірці першоджерела.
-
-
-## Пріоритет добового графіка над тижневим прогнозом
-
-ДТЕК повертає `fact` (добовий ГПВ) та `preset` (попередній тижневий прогноз) окремо. Їхні інтервали можуть значно відрізнятися, і це **не означає помилку API**. Для дати з перевіреним добовим графіком використовують саме **добовий графік**. Нові повідомлення тижневого прогнозу не містять минулих дат і днів із підтвердженим добовим графіком. Це лише правило показу: хеш тижневого джерела залишається повним, щоб зміна дати не спричиняла повторну публікацію. Раніше опубліковані Telegram-повідомлення автоматично не редагуються.
+See [Safe deployment checklist](docs/release-checklist.md). The new POWER_CONFIG_JSON secret must be installed, then the feature-branch address check and dry-run must both succeed. Do not merge solely on unit tests. The current active main-branch bot remains unchanged until the release checks pass.

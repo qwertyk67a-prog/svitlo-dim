@@ -1,4 +1,4 @@
-name: Dry-run DTEK audit (no Telegram)
+name: Dry-run source audit (no Telegram)
 on:
   workflow_dispatch:
   push:
@@ -9,6 +9,8 @@ on:
       - bot.py
       - event_scope.py
       - house_reliability.py
+      - power_config.py
+      - provider_transport.py
       - requirements.txt
       - constraints.txt
 permissions:
@@ -34,12 +36,11 @@ jobs:
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt', 'constraints.txt') }}
       - if: steps.chromium-cache.outputs.cache-hit != 'true'
         run: python -m playwright install --with-deps chromium
-      - name: Read DTEK and simulate decisions without Telegram
+      - name: Read configured source without Telegram
         env:
-          DTEK_ADDRESS_JSON: ${{ secrets.DTEK_ADDRESS_JSON }}
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           ANNOUNCEMENTS_ENABLED: ${{ vars.ANNOUNCEMENTS_ENABLED || 'true' }}
           REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '0' }}
-          DTEK_WAF_BROWSER: "1"
           DRY_RUN: "true"
           STATE_PATH: bot_state.json
         run: python bot.py --once

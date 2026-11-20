@@ -29,7 +29,7 @@ def test_read_step_does_not_get_state_push_token():
     assert "GITHUB_STATE_PUSH_TOKEN" not in notify["env"]
     assert "GITHUB_STATE_PUSH_TOKEN" in save["env"]
     assert "TELEGRAM_BOT_TOKEN" not in save["env"]
-    assert "DTEK_ADDRESS_JSON" not in save["env"]
+    assert "POWER_CONFIG_JSON" not in save["env"]
     assert "persist-credentials: false" in (
         ROOT/".github/workflows/check.yml").read_text()
     assert "GIT_ASKPASS" in save["run"]
@@ -42,7 +42,7 @@ def test_read_step_does_not_get_state_push_token():
 def test_both_secrets_only_referenced_by_name():
     wf=(ROOT/".github/workflows/check.yml").read_text()
     assert "secrets.TELEGRAM_BOT_TOKEN" in wf
-    assert "secrets.DTEK_ADDRESS_JSON" in wf
+    assert "secrets.POWER_CONFIG_JSON" in wf
     for filename in ("bot.py","alerts.py","house_reliability.py"):
         content=(ROOT/filename).read_text(encoding="utf-8")
         assert "TELEGRAM_BOT_TOKEN" not in content or (
@@ -65,8 +65,8 @@ def test_verify_address_invoked_as_module_and_never_sends_telegram():
     workflow=(ROOT/".github/workflows/verify-address.yml").read_text()
     assert "python -m scripts.verify_address" in workflow
     assert "python scripts/verify_address.py" not in workflow
-    assert "secrets.DTEK_ADDRESS_JSON" in workflow
-    assert "DTEK_WAF_BROWSER" in workflow
+    assert "secrets.POWER_CONFIG_JSON" in workflow
+    assert "POWER_CONFIG_JSON" in workflow
     assert "secrets.TELEGRAM_BOT_TOKEN" not in workflow
     import importlib
     verifier=importlib.import_module("scripts.verify_address")
@@ -80,7 +80,7 @@ def test_manual_dry_run_workflow_has_no_telegram_or_write_access():
     assert "TELEGRAM_BOT_TOKEN" not in content
     assert "TELEGRAM_CHAT_ID" not in content
     assert 'DRY_RUN: "true"' in content
-    assert "DTEK_ADDRESS_JSON" in content
+    assert "POWER_CONFIG_JSON" in content
 
 
 def test_dependencies_pinned_against_compatible_constraints():
@@ -88,7 +88,8 @@ def test_dependencies_pinned_against_compatible_constraints():
     assert "-c constraints.txt" in requirements
     assert "requests==" in requirements
     assert "beautifulsoup4==" in requirements
-    assert "dtek-blackout-client==" in requirements
+    assert "curl-cffi==" in requirements
+    assert "playwright-stealth==" in requirements
     assert "playwright==" in (ROOT / "constraints.txt").read_text()
 
 
@@ -98,7 +99,7 @@ def test_telegram_setup_is_manual_read_only_and_does_not_activate_monitoring():
     assert "contents: read" in content
     assert "secrets.TELEGRAM_BOT_TOKEN" in content
     assert "secrets.TELEGRAM_CHAT_ID" in content
-    assert "DTEK_ADDRESS_JSON" not in content
+    assert "POWER_CONFIG_JSON" not in content
     assert "BOT_ENABLED" not in content
     assert "python -m scripts.telegram_setup" in content
     assert "sendMessage" not in content
@@ -174,14 +175,14 @@ def test_no_production_hardcoded_queue_or_private_district():
     live=(root/".github/workflows/check.yml").read_text(encoding="utf-8")
     preview=(root/".github/workflows/audit-dry-run.yml").read_text(encoding="utf-8")
     example=(root/".env.example").read_text(encoding="utf-8")
-    assert "6.2" not in core
-    assert "6.2" not in alerts
-    assert "6.2" not in house
-    assert "6.2" not in live
-    assert "6.2" not in preview
-    assert "6.2" not in example
-    assert "DTEK_GROUP:" not in live and "DTEK_GROUP:" not in preview
+    assert f"GPV{3}.{1}" not in core
+    assert f"GPV{3}.{1}" not in alerts
+    assert f"GPV{3}.{1}" not in house
+    assert f"GPV{3}.{1}" not in live
+    assert f"GPV{3}.{1}" not in preview
+    assert f"GPV{3}.{1}" not in example
+    assert "TEST_QUEUE:" not in live and "TEST_QUEUE:" not in preview
     assert "129" not in verifier
-    assert "покровськ" not in verifier
-    assert "DTEK_ADDRESS_JSON" in live and "DTEK_ADDRESS_JSON" in preview
+    assert "вул. умовна" not in verifier.casefold()
+    assert "POWER_CONFIG_JSON" in live and "POWER_CONFIG_JSON" in preview
     assert "get_schedule(house_groups)" in core

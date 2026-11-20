@@ -1,7 +1,7 @@
 """Reliability guards for ONE configured house and ONE Telegram destination.
 
 No address or Telegram credentials are kept in this module.
-Daily confirmations come only from a fully parsed DTEK fact table.
+Daily confirmations come only from a fully parsed provider fact table.
 GitHub Actions cannot guarantee a five-minute warning deadline.
 """
 from __future__ import annotations
@@ -12,6 +12,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
+from power_config import official_site, operator_label
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ALLOWED = (5, 15, 30, 60)
@@ -68,7 +69,7 @@ def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
                 remaining = max(1, int((outage_start - now).total_seconds() // 60))
                 text = "\n".join((
                     "⏰ <b>Нагадування про планове відключення</b>",
-                    f"📅 {day:%d.%m.%Y} · Черга {html.escape(group.removeprefix('GPV'))}",
+                    f"📅 {day:%d.%m.%Y} · Черга {html.escape(queue_label(group))}",
                     f"Початок: <b>{start_minutes // 60:02d}:{start_minutes % 60:02d}</b>",
                     f"До відключення — приблизно {remaining} хв.",
                     "Час може змінитися. Актуальні зміни графіка публікуються окремо.",
@@ -77,16 +78,24 @@ def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
     return sorted(emitted, key=lambda x: x[2])
 
 
+def queue_label(group: str) -> str:
+    """Use the private display prefix; never guess a company's group format."""
+    from power_config import provider_config
+    prefix = provider_config()["queue_display_prefix"]
+    return group.removeprefix(prefix) if prefix else group
+
+
 def verified_house_queues(raw) -> tuple[str, ...]:
-    """Accept only explicit, recognized DTEK queue identifiers.
+    """Accept only explicit, recognized provider queue identifiers.
 
     Empty/malformed data never imply an actual queue removal.
     """
     if not isinstance(raw, (list, tuple, set)) or not raw:
-        raise ValueError("ДТЕК не підтвердив черги будинку")
-    if any(not isinstance(group, str) or
-           not re.fullmatch(r"GPV[1-6]\.[12]", group) for group in raw):
-        raise ValueError("ДТЕК повернув непідтверджену чергу")
+        raise ValueError("Оператор не підтвердив черги будинку")
+    from power_config import provider_config
+    catalog = set(provider_config()["queue_catalog"])
+    if any(not isinstance(group, str) or group not in catalog for group in raw):
+        raise ValueError("Оператор повернув непідтверджену чергу")
     return tuple(sorted(set(raw)))
 
 
@@ -116,22 +125,22 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     if not added and not removed:
         return list(current), None
 
-    title = ("🔄 <b>ДТЕК оновив черги будинку</b>" if has_previous
-             else "⚡️ <b>Уточнено черги будинку</b>")
+    title = (f"🔄 <b>{html.escape(operator_label())} оновив черги будинку</b>"
+             if has_previous else "⚡️ <b>Уточнено черги будинку</b>")
     lines = [title]
     if added:
         lines.append("➕ Додано: " + ", ".join(
-            html.escape(x.removeprefix("GPV")) for x in added))
+            html.escape(queue_label(x)) for x in added))
     if removed:
         label = "Вилучено" if has_previous else "Раніше відстежували"
         lines.append("➖ " + label + ": " + ", ".join(
-            html.escape(x.removeprefix("GPV")) for x in removed))
+            html.escape(queue_label(x)) for x in removed))
     lines.extend((
         "Актуальні черги: " + ", ".join(
-            html.escape(x.removeprefix("GPV")) for x in current),
+            html.escape(queue_label(x)) for x in current),
         "✅ Бот продовжує надсилати графіки всіх черг за цією адресою.",
         "Відключення можуть відрізнятися для частин будинку.",
-        '<a href="https://www.dtek-dnem.com.ua/ua/shutdowns">Джерело: ДТЕК</a>',
+        f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
     ))
     return list(current), "\n".join(lines)
 
