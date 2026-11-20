@@ -9,6 +9,8 @@ on:
       - bot.py
       - event_scope.py
       - house_reliability.py
+      - power_config.py
+      - provider_transport.py
       - requirements.txt
       - constraints.txt
 permissions:
