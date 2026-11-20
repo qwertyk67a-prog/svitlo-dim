@@ -43,11 +43,12 @@ def setup(monkeypatch,path):
 
 
 def seed_state(path, content):
-    identity = hmac.new(
-        TEST_CONFIG["state_key"].encode("utf-8"),
-        os.environ["POWER_CONFIG_JSON"].encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    from power_config import provider_config, checkpoint_namespace
+    identity = checkpoint_namespace(
+        provider_config(),
+        os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        os.environ.get("TELEGRAM_CHAT_ID", ""),
+    )
     path.write_text(json.dumps({"config:namespace": identity, **content}),
                     encoding="utf-8")
 
