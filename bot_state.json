@@ -32,8 +32,8 @@
     "status": "outages"
   },
   "address:last_outage": {
-    "digest": "2dd8bc1323eb9f84484bfe032e9195d0f72bfed9c1ba7e3b68f6e18980355d3d",
-    "end": "23:30 21.11.2026",
+    "digest": "d1b8a5d01e0ad99c7339a247467f44ebc6afa907927bc2bff7098c1ca940f472",
+    "end": "23:00 21.11.2026",
     "status": "active"
   },
   "house:groups": [
