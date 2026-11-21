@@ -258,7 +258,34 @@ async def _request(config, form, *, cookies=None, csrf=None):
         return _checked_response(response)
 
 
+_BROWSER_SESSION_CACHE = {}
+_BROWSER_SESSION_TTL = 120  # Per-process only; never persist WAF cookies in Git.
+
+
 async def ajax_post(config, form):
+    """Reuse verified browser cookies for the second query in the same run.
+
+    A scheduled GitHub job starts a new process. The cache therefore never
+    shares credentials between runs, properties or repositories.
+    """
+    import time
+
+    key = (config["site_url"], config["ajax_url"])
+    cached = _BROWSER_SESSION_CACHE.get(key)
+    if cached is not None:
+        expires, cookies, csrf = cached
+        if time.monotonic() < expires:
+            try:
+                return await _request(
+                    config, form, cookies=dict(cookies), csrf=csrf
+                )
+            except ProviderRateLimit:
+                raise
+            except Exception as exc:
+                LOG.warning("Cached session rejected (%s), refreshing",
+                            type(exc).__name__)
+        _BROWSER_SESSION_CACHE.pop(key, None)
+
     try:
         return await _request(config, form)
     except ProviderRateLimit:
@@ -268,11 +295,15 @@ async def ajax_post(config, form):
                     type(exc).__name__)
     cookies, csrf = await browser_cookies(config["site_url"])
     try:
-        return await _request(config, form, cookies=cookies, csrf=csrf)
+        result = await _request(config, form, cookies=cookies, csrf=csrf)
     except ProviderRateLimit:
         raise
     except Exception:
         raise RuntimeError("Official provider request unavailable") from None
+    _BROWSER_SESSION_CACHE[key] = (
+        time.monotonic() + _BROWSER_SESSION_TTL, dict(cookies), csrf,
+    )
+    return result
 
 
 async def get_homes(config, city, street):
