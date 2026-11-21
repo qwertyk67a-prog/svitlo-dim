@@ -21,22 +21,26 @@ def test_pinned_official_actions_and_checkout_has_no_persisted_credentials():
             assert actions[0]["with"]["persist-credentials"] is False
 
 
-def test_read_step_does_not_get_state_push_token():
+def test_state_token_isolated_from_bot_and_source_branch():
     wf=yaml.safe_load((ROOT/".github/workflows/check.yml").read_text())
     steps=wf["jobs"]["check"]["steps"]
     notify=next(s for s in steps if s.get("id")=="notify")
+    load=next(s for s in steps if s.get("id")=="load_state")
     save=next(s for s in steps if "Save notification state" in s.get("name",""))
-    assert "GITHUB_STATE_PUSH_TOKEN" not in notify["env"]
-    assert "GITHUB_STATE_PUSH_TOKEN" in save["env"]
-    assert "TELEGRAM_BOT_TOKEN" not in save["env"]
-    assert "POWER_CONFIG_JSON" not in save["env"]
+    assert "REPOSITORY_STATE_TOKEN" not in notify["env"]
+    assert "REPOSITORY_STATE_TOKEN" in load["env"]
+    assert "REPOSITORY_STATE_TOKEN" in save["env"]
+    for step in (load,save):
+        assert "TELEGRAM_BOT_TOKEN" not in step["env"]
+        assert "POWER_CONFIG_JSON" not in step["env"]
+        assert step["env"]["REPOSITORY_STATE_BRANCH"] == "bot-state"
+        assert "python -m scripts.repo_state" in step["run"]
+    assert "steps.load_state.outcome == 'success'" in save["if"]
+    assert "git push" not in save["run"]
+    assert "GIT_ASKPASS" not in save["run"]
+    assert "HEAD:main" not in save["run"]
     assert "persist-credentials: false" in (
         ROOT/".github/workflows/check.yml").read_text()
-    assert "GIT_ASKPASS" in save["run"]
-    assert 'git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:main' in save["run"]
-    result=subprocess.run(["bash","-n"],input=save["run"],text=True,
-                          capture_output=True,check=False)
-    assert result.returncode == 0, result.stderr
 
 
 def test_both_secrets_only_referenced_by_name():
