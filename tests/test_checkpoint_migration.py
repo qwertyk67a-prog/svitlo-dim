@@ -40,3 +40,32 @@ def test_migration_identity_matches_new_delivery_identity():
     identity = checkpoint_namespace(config, "token-for-test", "-100test")
     state = migrate_snapshot({}, identity)
     assert state["config:namespace"] == identity
+
+
+def test_migration_refuses_to_run_while_monitor_active(monkeypatch):
+    import pytest
+    from scripts import migrate_checkpoint
+    monkeypatch.setenv("BOT_ENABLED", "true")
+    monkeypatch.setenv("CONFIRM_MIGRATION", "MIGRATE")
+    with pytest.raises(RuntimeError, match="Disable"):
+        migrate_checkpoint.run()
+
+
+def test_migration_requires_explicit_confirmation(monkeypatch):
+    import pytest
+    from scripts import migrate_checkpoint
+    monkeypatch.setenv("BOT_ENABLED", "false")
+    monkeypatch.delenv("CONFIRM_MIGRATION", raising=False)
+    with pytest.raises(RuntimeError, match="confirmation"):
+        migrate_checkpoint.run()
+
+
+def test_external_dispatcher_requires_explicit_activation():
+    root = Path(__file__).resolve().parents[1]
+    worker = (root / "deploy/cloudflare-dispatcher/src/index.js").read_text()
+    wrangler = (root / "deploy/cloudflare-dispatcher/wrangler.toml").read_text()
+    assert 'env.ENABLED !== "true"' in worker
+    assert 'crons = ["*/5 * * * *"]' in wrangler
+    assert "GH_WORKFLOW_TOKEN" in worker
+    assert "ghp_" not in worker
+    assert "ENABLED = " not in wrangler
