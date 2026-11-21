@@ -1,8 +1,14 @@
-# Five-minute schedule. All configuration, including ENABLED, is set
-# in the Cloudflare dashboard. Never store secrets in this file.
+# Five-minute scheduler. Values here intentionally contain no secrets.
+# Keep environment variables in this file so Git-linked deployments retain
+# them. GH_WORKFLOW_TOKEN must be a Cloudflare Runtime Secret, never in Git.
 name = "svitlo-schedule-dispatcher"
 main = "src/index.js"
 compatibility_date = "2026-11-21"
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+[vars]
+GH_REPOSITORY = "qwertyk67a-prog/svitlo-dim"
+GH_REF = "main"
+ENABLED = "false"
