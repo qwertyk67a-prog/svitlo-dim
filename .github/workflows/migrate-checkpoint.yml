@@ -1,0 +1,34 @@
+name: Migrate notification checkpoint (no Telegram)
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type MIGRATE after disabling BOT_ENABLED'
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Migrate old state into isolated branch
+        env:
+          BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+          CONFIRM_MIGRATION: ${{ inputs.confirmation }}
+          REPOSITORY_STATE_TOKEN: ${{ github.token }}
+          REPOSITORY_STATE_BRANCH: bot-state
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATE_PATH: bot_state.json
+        run: python -m scripts.migrate_checkpoint
