@@ -416,11 +416,22 @@ def fetch_official_page():
 
 
 def normalized_house(value):
-    """Preserve house-number separators: 1/1 is NOT house 11."""
-    text = re.sub(r"\s+", "", str(value)).casefold().replace("\\", "/")
-    text = text.replace("a", "а").replace("b", "в").replace("i", "і")
-    # provider commonly spells a letter suffix with or without a dash.
-    return re.sub(r"(?<=\d)-(?=[а-яіїєґ])", "", text)
+    """Normalize typography, never remove a numeric building component.
+
+    Optional separators before a FINAL letter suffix are handled by a
+    unique-candidate check in get_house_entry. Do not invent aliases.
+    """
+    import unicodedata
+    text = unicodedata.normalize("NFKC", str(value)).casefold().strip()
+    text = re.sub(r"^(?:буд(?:инок)?\\.?\\s*)?№\\s*", "", text)
+    text = re.sub(r"\\s+", "", text)
+    text = text.translate(str.maketrans({
+        "a": "а", "b": "в", "i": "і",
+        "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-",
+        "⁄": "/", "\\\\": "/",
+    }))
+    # A suffix dash is typographical only for a final letter.
+    return re.sub(r"(?<=\\d)-(?=[а-яіїєґ]$)", "", text)
 
 
 def address_fields(secret):
