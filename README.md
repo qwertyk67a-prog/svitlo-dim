@@ -81,9 +81,12 @@ trigger new queue assignments or false power restoration.
 
 ## State and security
 
-The public bot_state.json checkpoint contains HMAC-pseudonymized queue keys,
-timetable hashes and recent event status. It is not encrypted. The private
-state_key is also used for the HMAC namespace of each repository's property.
+The `bot-state` GitHub branch contains the HMAC-pseudonymized JSON
+checkpoint, separate from the active `main` code branch. The repository
+already has an empty `bot-state` branch for the first installation. A
+manual one-time migration workflow preserves previous notification history
+and prevents most first-run duplicates. The public checkpoint is not encrypted.
+The private state_key also defines the namespace for each property.
 A changed configuration starts a new delivery history. Do not reuse state_key
 between unrelated properties. Previous public Git history is not erased.
 No paid hosting or encryption service has been added.
@@ -102,3 +105,19 @@ Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Neve
 ## Before deploying this version
 
 See [Safe deployment checklist](docs/release-checklist.md). The new POWER_CONFIG_JSON secret must be installed, then the feature-branch address check and dry-run must both succeed. Do not merge solely on unit tests. The current active main-branch bot remains unchanged until the release checks pass.
+
+## Free scheduler and locality scope
+
+The existing native GitHub cron can run late. The optional Cloudflare Worker
+in `deploy/cloudflare-dispatcher` dispatches checks every five minutes on
+Cloudflare Workers Free, without geocoding or hosting the Python monitor.
+The Worker is **not deployed or enabled** until the owner connects Cloudflare
+and adds an Actions:write GitHub token as a Worker Secret.
+
+The provider's official address directory determines the house's queue.
+District/quarter names from private configuration are used only when an
+official notice explicitly targets those areas. They are not independently
+verified geographic boundaries and do not block queue-based schedules.
+No recurring Google Maps / paid geocoding is used.
+
+See `docs/release-checklist.md` for the exact safe cutover sequence.
