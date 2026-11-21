@@ -31,6 +31,17 @@
     ],
     "status": "outages"
   },
+  "2026-11-22:GPV6.2": {
+    "digest": "f6c317a02633e9d115669883e1eff0856669a66e728c0ceefafa51231d139810",
+    "spans": [
+      [
+        1050,
+        1320,
+        "off"
+      ]
+    ],
+    "status": "outages"
+  },
   "address:last_outage": {
     "end": "23:00 21.11.2026",
     "status": "expired"
