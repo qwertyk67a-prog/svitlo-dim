@@ -43,3 +43,6 @@ def private_synthetic_provider(monkeypatch):
     monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(
         TEST_CONFIG, ensure_ascii=False,
     ))
+    # A GitHub workflow is a fresh process; each test must start likewise.
+    import provider_transport
+    monkeypatch.setattr(provider_transport, "_BROWSER_SESSION_CACHE", {})
