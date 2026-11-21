@@ -11,4 +11,4 @@ crons = ["*/5 * * * *"]
 [vars]
 GH_REPOSITORY = "qwertyk67a-prog/svitlo-dim"
 GH_REF = "main"
-ENABLED = "false"
+ENABLED = "true"
