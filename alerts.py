@@ -422,8 +422,10 @@ def normalized_house(value):
     unique-candidate check in get_house_entry. Do not invent aliases.
     """
     import unicodedata
-    text = unicodedata.normalize("NFKC", str(value)).casefold().strip()
+    text = str(value).casefold().strip()
+    # Unicode NFKC expands № into "No"; remove that label first.
     text = re.sub(r"^(?:буд(?:инок)?\.?\s*)?№\s*", "", text)
+    text = unicodedata.normalize("NFKC", text)
     text = re.sub(r"\s+", "", text)
     text = text.translate(str.maketrans({
         "a": "а", "b": "в", "i": "і",
