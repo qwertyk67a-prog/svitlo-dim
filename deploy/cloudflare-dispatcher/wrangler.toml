@@ -1,12 +1,8 @@
-# Optional deployment template. No secrets are included.
+# Five-minute schedule. All configuration, including ENABLED, is set
+# in the Cloudflare dashboard. Never store secrets in this file.
 name = "svitlo-schedule-dispatcher"
 main = "src/index.js"
 compatibility_date = "2026-11-21"
 
 [triggers]
 crons = ["*/5 * * * *"]
-
-[vars]
-ENABLED = "false"
-GH_REF = "main"
-# Set GH_REPOSITORY as an environment variable per deployment.
