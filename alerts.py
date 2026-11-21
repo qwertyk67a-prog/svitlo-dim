@@ -423,15 +423,15 @@ def normalized_house(value):
     """
     import unicodedata
     text = unicodedata.normalize("NFKC", str(value)).casefold().strip()
-    text = re.sub(r"^(?:буд(?:инок)?\\.?\\s*)?№\\s*", "", text)
-    text = re.sub(r"\\s+", "", text)
+    text = re.sub(r"^(?:буд(?:инок)?\.?\s*)?№\s*", "", text)
+    text = re.sub(r"\s+", "", text)
     text = text.translate(str.maketrans({
         "a": "а", "b": "в", "i": "і",
         "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-",
-        "⁄": "/", "\\\\": "/",
+        "⁄": "/", "\\": "/",
     }))
     # A suffix dash is typographical only for a final letter.
-    return re.sub(r"(?<=\\d)-(?=[а-яіїєґ]$)", "", text)
+    return re.sub(r"(?<=\d)-(?=[а-яіїєґ]$)", "", text)
 
 
 def address_fields(secret):
