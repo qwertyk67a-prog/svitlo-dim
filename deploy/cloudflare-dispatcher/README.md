@@ -1,40 +1,64 @@
-# Optional Cloudflare five-minute dispatcher
+# Cloudflare Free: five-minute GitHub workflow dispatcher
 
-**Not activated.** Existing GitHub monitoring remains unchanged.
+This deploy has **not** been activated. The existing Telegram monitor stays
+operational. A Cloudflare account connection and restricted GitHub token are
+necessary, and cannot be created by the linked GitHub connector.
 
-GitHub documents that native scheduled workflows can be delayed or omitted. A
-Cloudflare Cron Trigger can call the existing workflow-dispatch API every five
-minutes, independently of GitHub's cron scheduler. GitHub runners can still queue,
-and exactly-five-minute polling and notification delivery are not guaranteed.
+## Why
 
-## Configuration
+Native GitHub scheduled workflows have been observed starting about once
+per hour despite a five-minute cron. A separate free Cloudflare Cron Trigger
+sends a workflow_dispatch request every five minutes. GitHub may still queue
+a run. Neither delivery nor exact five-minute execution is guaranteed.
 
-1. Create a Cloudflare Worker with the code in src/index.js and the five-minute
-   cron trigger from wrangler.toml. Use Cloudflare's official dashboard or CLI.
-2. Add Worker variables GH_REPOSITORY (owner/name), GH_REF (main),
-   and ENABLED (initially false).
-3. Create a **fine-grained GitHub personal access token**, restricted to this
-   repository and **Actions: write** permission only.
-4. Store the PAT as Cloudflare Worker **Secret GH_WORKFLOW_TOKEN**.
-5. Check current bot delivery and serialized runs in GitHub first.
-6. Set ENABLED=true and verify incoming workflow_dispatch runs in GitHub Actions.
-7. Measure real run intervals for at least 24 hours before declaring improved
-   scheduling. Do not promise strict five-minute delivery to residents.
+At one request every five minutes, the Worker executes 288 times/day.
+This is within Cloudflare Workers Free's published 100,000 requests/day,
+assuming no unrelated account workloads exceed the allowance.
 
-The Worker has no fetch() event handler and no externally accessible HTTP
-endpoint. It stores no property details, provider URL or Telegram credentials.
-Do not log the GitHub token and do not commit any real secret.
+## Deployment without paid features
 
-The Github Actions workflow also checks BOT_ENABLED and uses one concurrency
-group. An external dispatch may overlap a native scheduled event. Digest-based
-suppression reduces ordinary duplicate notifications but cannot guarantee
-exactly-once Telegram delivery after an ambiguous network timeout.
+1. Sign in to Cloudflare and choose **Workers Free**. Do not add a paid plan.
+2. Use Workers Builds → Connect to GitHub.
+3. Select repository `qwertyk67a-prog/svitlo-dim`, branch
+   `feature/provider-independent-template-20261120`, root directory
+   `deploy/cloudflare-dispatcher`. Set deployment command
+   `npx wrangler deploy`.
+4. The Wrangler project name is `svitlo-schedule-dispatcher`.
+5. In GitHub, create a fine-grained personal access token scoped **only** to
+   this repository and with **Actions: write** permission. Choose the
+   shortest practical expiration. Never publish the token.
+6. Under the Worker Settings → Variables and Secrets add:
+   - Plain variable `GH_REPOSITORY` = `qwertyk67a-prog/svitlo-dim`.
+   - Plain variable `GH_REF` = `main`.
+   - Plain variable `ENABLED` = `true` only when ready to begin dispatches.
+   - **Encrypted secret** `GH_WORKFLOW_TOKEN` = your scoped GitHub token.
+7. Verify the Cron Trigger `*/5 * * * *` is present. Cloudflare notes a
+   propagation delay of up to 15 minutes.
+8. In GitHub Actions, confirm new runs with event `workflow_dispatch`.
+   Check that the existing `BOT_ENABLED` gate allows intentional monitoring.
+9. Record actual run intervals for one day. If gaps persist, improve the
+   backend architecture rather than claiming five-minute guarantees.
 
-Keep the native GitHub cron as a fallback unless duplicate checks overwhelm
-the electricity provider. If strict bounded polling is required, use a
-continuously running server with persistent state rather than workflow dispatch.
+The Worker has no HTTP request handler and contains no Telegram secrets,
+property address or electricity-source credentials. Keep these only in
+existing GitHub repository Secrets. The GitHub token exists **only** inside
+Cloudflare's encrypted secrets.
 
-See:
-- https://developers.cloudflare.com/workers/configuration/cron-triggers/
-- https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event
-- https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+## Deployment safety
+
+- GitHub's existing concurrency lock prevents simultaneous checks of this repo.
+- The native GitHub cron can remain as a fallback. Duplicate checks are not
+  equivalent to duplicate announcements, but delivery after ambiguous
+  network failures can still repeat.
+- Do **not** reset old state or merge PR #17 merely to enable this scheduler.
+  It can dispatch the existing `check.yml` in `main` first.
+- After PR #17 is accepted, switch Cloudflare's deployment branch to
+  `main` if automatic Worker updates are desired.
+- The free Worker is a lightweight dispatcher. Python, Playwright and
+  state storage remain on GitHub.
+
+Official documentation:
+https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/
+https://developers.cloudflare.com/workers/ci-cd/builds/configuration/
+https://developers.cloudflare.com/workers/configuration/cron-triggers/
+https://developers.cloudflare.com/workers/platform/pricing/
