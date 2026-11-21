@@ -1,70 +1,80 @@
-# Safe deployment checklist
+# Safe release checklist (no paid services)
 
-This is an operational checklist. The code is **not fully deployed** until the
-owner installs and verifies the private configuration for the selected source.
+The current main-branch bot is live. Do not merge this feature branch until
+all checks pass. The linked GitHub connector cannot update repository
+Secrets/Variables, create a restricted PAT, or deploy Cloudflare.
 
-## A. Prepare without interrupting the existing bot
+## 1. Completed preparatory checks
 
-1. Keep the existing main-branch monitor running.
-2. Open **Settings → Secrets and variables → Actions → Repository secrets**.
-3. Create **POWER_CONFIG_JSON**, using the example schema in README.md.
-   Transfer the address from the previously configured secret inside GitHub.
-   Include operator, official site, same-host AJAX endpoint, public Telegram
-   announcement channel, city/region grammatical forms and negative filters.
-4. Include the full **queue_catalog** for the operator's selected adapter.
-   Do not fill a single assumed queue from the old apartment.
-5. Generate a unique **state_key** locally:
-   `python -c "import secrets; print(secrets.token_hex(32))"`
-   Paste only the 64-character result into the new GitHub Secret.
-6. Keep the existing **TELEGRAM_BOT_TOKEN** and **TELEGRAM_CHAT_ID** secrets.
-   Do not print or paste their contents into Issues, code or workflow inputs.
+- POWER_CONFIG_JSON was installed and accepted by the feature-branch address
+  check and the source audit on 20 November.
+- The new source adapter and session reuse passed mocked integration tests.
+- Private geography does not require map API calls.
+- A GitHub branch `bot-state` now exists with an empty JSON checkpoint.
+- The feature-branch `check.yml` reads and updates only that isolated branch.
+- Cloudflare dispatcher code is ready but is not deployed or activated.
 
-## B. Read-only preflight on the feature branch
+## 2. Optional free scheduling, without changing main
 
-1. In GitHub Actions open **Verify configured address**.
-2. Choose **Run workflow → feature/provider-independent-template-20261120**.
-3. Confirm one or more verified queues and that schedule retrieval succeeded.
-4. Open **Dry-run source audit (no Telegram)**.
-5. Select the same feature branch and run once.
-6. Require **Success** on both workflows. Review the logs for errors.
-7. Neither workflow should send Telegram messages or write a checkpoint.
-8. If the configured provider does not speak the ajax_v1 protocol, **stop**.
-   Another adapter requires new code and validated live-source tests.
+1. Follow `deploy/cloudflare-dispatcher/README.md`.
+2. Use Cloudflare **Workers Free**, never Workers Paid.
+3. Set Worker variables GH_REPOSITORY, GH_REF and ENABLED in Cloudflare.
+4. Store a restricted GitHub Actions:write token as GH_WORKFLOW_TOKEN in
+   Cloudflare Worker Secrets only.
+5. Activate the five-minute Cron Trigger and verify its GitHub
+   workflow_dispatch jobs for 24 hours.
+6. This only accelerates triggering; GitHub-runner start delays remain.
 
-## C. Switch the active installation
+The dispatcher can target old `main` before the feature merge. Keep the
+existing GitHub native cron as a backup until reliability is measured.
 
-1. Ensure the new secret is complete. Before merging, set
-   **Repository variable BOT_ENABLED=false** to stop the old live job.
-2. Merge the reusable-template PR only after both read-only preflights pass.
-3. The old public bot_state.json is removed by the template change. New
-   pseudonymized checkpoints use a new installation namespace.
-4. Check that the existing Telegram bot and destination are correct.
-5. Re-enable **BOT_ENABLED=true**.
-6. Manually run **Check power schedule** on main, confirm GitHub Actions
-   reports success and the correct schedule reaches the desired destination.
-7. Review that bot_state.json contains anonymized queue references.
-8. Review the next scheduled run to check that unchanged notices stay silent.
+## 3. New version read-only acceptance
 
-## D. Duplicate for another property
+1. Run **Verify configured address (no Telegram)** on
+   `feature/provider-independent-template-20261120`.
+2. Run **Dry-run source audit (no Telegram)** on the same branch.
+3. Require both to succeed; check the same verified queue and official data.
+4. These calls do not send Telegram messages or overwrite the checkpoint.
+5. If the service or configured address is ambiguous, do not switch.
 
-1. Copy the repository into a different public GitHub repository.
-2. Create completely new POWER_CONFIG_JSON, TELEGRAM_BOT_TOKEN and
-   TELEGRAM_CHAT_ID secrets; repository secrets never transfer.
-3. Generate a **different** state_key for each property and destination.
-4. Start with BOT_ENABLED=false, then repeat read-only preflight.
-5. Do not reuse a previous property's bot_state.json or queue_catalog.
-6. Use the same ajax_v1 adapter only for confirmed compatible sources.
-   Different API formats need separate, tested adapters.
+## 4. Freeze, migrate and switch (manual short outage)
 
-## Limitations
+1. In Settings → Secrets and variables → Actions → Variables, set
+   `BOT_ENABLED=false`. Confirm the next scheduler run takes the inactive
+   branch and sends nothing.
+2. On the feature branch, run the manual workflow
+   **Migrate notification checkpoint (no Telegram)** with confirmation
+   exactly `MIGRATE`. It reads legacy `main/bot_state.json` and writes an
+   HMAC-anonymized checkpoint to `bot-state` once, without sending messages.
+3. Confirm the migration workflow is green. It refuses to overwrite a
+   nonempty target branch or run with BOT_ENABLED=true.
+4. Refresh the feature branch against the now-frozen `main`; the old active
+   bot's repeated state commits may otherwise make PR #17 conflict.
+5. Merge PR #17 into main only after the above checks.
+6. Confirm that main no longer stores `bot_state.json` on every check.
+7. Set `BOT_ENABLED=true`. Manually run **Check power schedule** on main.
+8. Confirm the real Telegram chat receives only new/changed notices and the
+   bot-state checkpoint updates. Check another run with no schedule change.
+9. Confirm that native GitHub and Cloudflare scheduled runs do not overlap,
+   repeat messages or exceed expected frequency.
+10. Never paste tokens, precise addresses or raw state into public issues/logs.
 
-- Old publicly committed values remain in Git history.
-- Public checkpoint data are pseudonymized, not encrypted.
-- No paid storage, server or encryption package is required.
-- Standard public-repository GitHub Actions runners are free, subject to
-  service limits and GitHub policies.
-- Scheduled GitHub Actions may be delayed or skipped. Telegram may deliver
-  a message before a network timeout; exactly-once delivery is impossible
-  with this checkpoint design.
-- The owner must install GitHub Secrets. The assistant cannot access or
-  create repository Secrets using the current GitHub connection.
+## 5. Follow-up monitoring
+
+- Track the last successful check and time since the last attempted check.
+- Distinguish source failure, queue lookup failure, Telegram delivery failure
+  and state-write failure. A green run does not prove power is available.
+- Retain event deduplication after deployment; state migration reduces first-
+  run duplicates, but Telegram cannot guarantee exactly-once delivery.
+- Audit historical public state commits separately. They cannot be erased
+  by moving future state to a new branch.
+- If external scheduling still does not give acceptable delays, use a
+  continuously running backend. Do not promise strict five-minute delivery.
+
+## 6. Duplicate for a second property
+
+- Clone the reusable repo without copying a prior bot-state history.
+- Create new POWER_CONFIG_JSON, bot token, chat ID and random state_key.
+- Create a new empty isolated state branch, run preflight, then activate.
+- Only the ajax_v1 provider protocol is implemented. Other utility companies
+  require tested adapters, not just different URLs.
