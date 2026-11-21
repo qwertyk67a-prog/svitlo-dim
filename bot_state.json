@@ -32,9 +32,8 @@
     "status": "outages"
   },
   "address:last_outage": {
-    "digest": "d1b8a5d01e0ad99c7339a247467f44ebc6afa907927bc2bff7098c1ca940f472",
     "end": "23:00 21.11.2026",
-    "status": "active"
+    "status": "expired"
   },
   "house:groups": [
     "GPV6.2"
