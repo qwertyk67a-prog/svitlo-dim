@@ -1,0 +1,42 @@
+"""Migration preserves delivery history but never blindly adopts foreign identity."""
+import json
+from pathlib import Path
+
+from bot import state_write, state_read, _queue_tokens
+from power_config import provider_config, checkpoint_namespace
+from scripts.migrate_checkpoint import migrate_snapshot
+
+
+def test_migration_removes_unknown_fields_and_previous_namespace(tmp_path):
+    legacy = {
+        "config:namespace": "OLD-OTHER-ADDRESS",
+        "house:groups": ["GPV3.1"],
+        "2026-11-21:GPV3.1": {"digest": "abc", "status": "outages"},
+        "week:2026-11-16:GPV3.1": {"digest": "weekly"},
+        "reminder:2026-11-21:GPV3.1:480:15": {"sent": True},
+        "official:last_id": 124,
+        "official:post_hashes": {"121": "abc"},
+        "unknown:secret": "never-copy",
+    }
+    new = migrate_snapshot(legacy, "new-private-identity")
+    assert new["config:namespace"] == "new-private-identity"
+    assert new["house:groups"] == ["GPV3.1"]
+    assert "unknown:secret" not in new
+    assert new["2026-11-21:GPV3.1"]["digest"] == "abc"
+    assert new["official:last_id"] == 124
+
+    file = tmp_path / "state.json"
+    state_write(file, new)
+    public = file.read_text(encoding="utf-8")
+    assert "GPV3.1" not in public
+    assert "never-copy" not in public
+    assert "OLD-OTHER-ADDRESS" not in public
+    assert "new-private-identity" in public
+    assert state_read(file) == new
+
+
+def test_migration_identity_matches_new_delivery_identity():
+    config = provider_config()
+    identity = checkpoint_namespace(config, "token-for-test", "-100test")
+    state = migrate_snapshot({}, identity)
+    assert state["config:namespace"] == identity
