@@ -89,3 +89,29 @@ The installation checkpoint now uses canonicalized operational identity, not raw
 - A 64-character hex state key is required. Syntax validation cannot prove randomness; use a cryptographically secure generator.
 - GitHub Actions unit run 44766285064 passed 188 tests before the documentation-only release checklist was added.
 - A live acceptance run with the new POWER_CONFIG_JSON is still required before merging to the active main branch.
+
+## 21 November 2026 corrective implementation
+
+The earlier independent-geometry evaluator was removed. Paid geocoding is not
+needed for routine queue checks. The district and historical quarter in the
+private config are used only to filter explicit official territory notices.
+This is a stated geographic claim, not automatic GIS proof.
+
+- House number typographical aliases now cover Unicode dashes, spacing and
+  Latin look-alike suffixes. Numeric suffixes and multiple matches fail closed.
+- The browser session fetched during an official provider fallback is reused
+  for subsequent queries in the same process. Rate-limited requests are not
+  retried through the browser.
+- Isolated `bot-state` branch created. Live monitoring code on the feature
+  branch no longer commits checkpoints into `main`.
+- A manual one-time `migrate-checkpoint.yml` workflow preserves eligible
+  old notification history and writes only pseudonymized data to `bot-state`.
+  It cannot run while BOT_ENABLED=true and will not overwrite nonempty state.
+- Cloudflare Free scheduler is a **scaffold only**. It is not deployed,
+  connected or activated. It needs a separate Cloudflare account and a
+  restricted Actions:write GitHub token. Five-minute trigger is not an
+  end-to-end delivery promise.
+- **219 tests passed** in GitHub Actions run 44917592362 for all code and
+  migration logic. Documentation edits followed without runtime code changes.
+- Re-run live no-Telegram preflights before any production cutover.
+- Old public Git history still exposes historical checkpoint metadata.
