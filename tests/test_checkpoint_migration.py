@@ -68,4 +68,4 @@ def test_external_dispatcher_requires_explicit_activation():
     assert 'crons = ["*/5 * * * *"]' in wrangler
     assert "GH_WORKFLOW_TOKEN" in worker
     assert "ghp_" not in worker
-    assert "ENABLED = " not in wrangler
+    assert 'ENABLED = "false"' in wrangler
