@@ -16,7 +16,7 @@
     "status": "outages"
   },
   "2026-11-21:GPV6.2": {
-    "digest": "68a1878059a867c1aed22307e9e4bd49f08d8da36e52c9a0a2a6c7ec2990faff",
+    "digest": "5ecaef77034db6d9097a5abea53994914cd75aa0a06edd39f1ca69976d5c2bd7",
     "spans": [
       [
         0,
@@ -25,7 +25,7 @@
       ],
       [
         1230,
-        1410,
+        1380,
         "off"
       ]
     ],
