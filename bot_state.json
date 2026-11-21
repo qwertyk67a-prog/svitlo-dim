@@ -27,9 +27,8 @@
     "status": "cancelled"
   },
   "address:last_outage": {
-    "digest": "b987efe130cb8f839c966f734e93cf7eb429667476832436e6c5b193b1978dfa",
     "end": "03:30 21.11.2026",
-    "status": "active"
+    "status": "expired"
   },
   "house:groups": [
     "GPV6.2"
