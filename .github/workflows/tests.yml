@@ -6,6 +6,10 @@ on:
       - power_config.py
       - provider_transport.py
       - scripts/verify_address.py
+      - scripts/repo_state.py
+      - scripts/migrate_checkpoint.py
+      - .github/workflows/migrate-checkpoint.yml
+      - deploy/cloudflare-dispatcher/**
       - scripts/verify_source_tables.py
       - .github/workflows/verify-address.yml
       - .github/workflows/verify-source-tables.yml
