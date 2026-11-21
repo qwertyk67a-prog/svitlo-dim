@@ -1,64 +1,47 @@
-# Independent geographic verification design
+# Geography: minimum useful verification (no paid map API)
 
-**Status:** geometry checks implemented and synthetic-tested, but live geocoding
-and trusted boundary-source integration are NOT activated.
+## Decision
 
-## Verified vs claimed
+The supplier's address directory is the source of truth for the house's
+electricity queue. The bot does **not** run Google Maps, Google Geocoding,
+OpenStreetMap Nominatim, Visicom or any other map API every five minutes.
 
-- Provider address lookup confirms only that the supplier recognizes the
-  configured city, street, house and supplies one or more queue identifiers.
-- A district or historical quarter copied into POWER_CONFIG_JSON is a user
-  claim. Its presence or nonempty string is NOT independent verification.
-- An internet search snippet, map centroid or bounding box is NOT proof that
-  the actual building lies inside a district.
-- A location may be a municipal administrative district and simultaneously
-  an informal or historical neighborhood. These are different datasets.
-- A geocoder may know a building but lack the exact quarter boundary.
+- A unique house match against the official supplier directory is required
+  for new queue assignments.
+- The locally declared district and quarter are descriptive, **not**
+  independent geographic certification.
+- District and quarter matter only when a genuine official operational
+  notice explicitly names those territories.
+- If the relevant territory cannot be established confidently, omit that
+  narrowly scoped warning; do not suppress confirmed address-based schedules.
+- Never infer a quarter from a map pin, street centroid or bounding box.
+- A quarter is a neighborhood/historical name, not necessarily a municipality
+  administrative boundary.
 
-## Selected mechanism
+The existing `coverage_for_house()` function already restricts matching to
+named official announcements, and requires an explicit configured district or
+quarter for corresponding notifications. The exact quarter string is optional.
 
-A separate **one-time verification**, not a request every five minutes:
+## Optional future map verification
 
-1. Parse the private address. Require the unique supplier lookup to succeed.
-2. Use a licensed, documented geocoder to locate the exact building.
-3. Match city, street and house separately; reject approximate addresses.
-4. Obtain the actual geometry for municipal district and historical quarter
-   from a legitimate GeoJSON provider (not only a center or bounding box).
-5. Use geo_boundaries.membership to test the address coordinate against both
-   polygons. Hole and border results are unverified.
-6. Record the provenance, source object ID, data timestamp and result in a
-   **private** checkpoint. Do not expose the location or raw geometry in
-   public GitHub state or Actions logs.
-7. Cache the result. Revalidate only after the address, selected locality,
-   boundary-source version or a long freshness interval changes.
-8. Never call a disputed quarter 'verified'. With no independent geometry,
-   report geography as unverified and disable only narrowly targeted
-   quarter/district messages that depend on unknown coverage.
+If an actual source begins posting quarter-specific alerts that matter, add
+**one-time, cached verification** on setup only. Prefer licensed, genuinely free
+municipal GIS/open geographic data that contains actual polygon boundaries.
+Do not require a paid API or a billing-enabled Google project.
 
-The daily outage schedule comes directly from the verified supplier queue
-and does not depend on geographic geocoding.
+Public OSM Nominatim may be used only in compliance with its usage policy; it
+is not an acceptable unbounded backend for automatically cloned monitoring bots.
 
-## External sources and licensing
+## Current configuration
 
-- Use official municipal GIS GeoJSON where available. Administrative region
-  and informal neighborhood data often have different coverage.
-- A Ukrainian commercial geocoder offers both address features and historic
-  district polygons, but requires API credentials and has licensing rules.
-  Its published test key is for a limited duration; production free use has
-  accessibility requirements. Do not assume a private Telegram group
-  qualifies for free use.
-- The public Nominatim OSM service has restricted usage and should not be
-  used as the generic automated geocoding backend for many duplicated bots.
-  Do not scrape public maps for their internal API.
-- If no compliant and adequate source is available, a manual address
-  assertion remains **declared**, never **independently verified**.
+The currently configured address and geography were supplied by the operator
+of this installation. Geographic values must not be logged or written into
+public JSON checkpoints.
 
-Documentation for licensed geographic APIs:
-https://api.visicom.ua/uk/products/data-api/data-api-references/geocode
-https://api.visicom.ua/uk/products/data-api/data-api-references/feature
-https://api.visicom.ua/uk/price
-https://api.visicom.ua/uk/docs/terms-of-free-use
+The preliminary GeoJSON polygon evaluator was removed from the production
+branch because it had no live boundary data, no licensed source, and no
+relevant recurring use case. This reduces maintenance and false confidence.
 
-**Release blocker:** live geocoding, API rights, suitable boundary geometries,
-and private checkpoint storage have not been established. They require separate
-acceptance tests before this mechanism may change production alert filtering.
+References:
+https://developers.google.com/maps/documentation/geocoding/usage-and-billing
+https://operations.osmfoundation.org/policies/nominatim/
