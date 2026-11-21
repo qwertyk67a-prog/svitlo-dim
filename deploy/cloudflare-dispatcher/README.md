@@ -20,7 +20,7 @@ assuming no unrelated account workloads exceed the allowance.
 1. Sign in to Cloudflare and choose **Workers Free**. Do not add a paid plan.
 2. Use Workers Builds → Connect to GitHub.
 3. Select repository `qwertyk67a-prog/svitlo-dim`, branch
-   `feature/provider-independent-template-20261120`, root directory
+   `main`, root directory
    `deploy/cloudflare-dispatcher`. Set deployment command
    `npx wrangler deploy`.
 4. The Wrangler project name is `svitlo-schedule-dispatcher`.
@@ -52,8 +52,8 @@ Cloudflare's encrypted secrets.
   network failures can still repeat.
 - Do **not** reset old state or merge PR #17 merely to enable this scheduler.
   It can dispatch the existing `check.yml` in `main` first.
-- After PR #17 is accepted, switch Cloudflare's deployment branch to
-  `main` if automatic Worker updates are desired.
+- Keep Cloudflare Workers Builds on `main`. The Worker is independent of
+  whether PR #17 is merged.
 - The free Worker is a lightweight dispatcher. Python, Playwright and
   state storage remain on GitHub.
 
@@ -62,3 +62,5 @@ https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-in
 https://developers.cloudflare.com/workers/ci-cd/builds/configuration/
 https://developers.cloudflare.com/workers/configuration/cron-triggers/
 https://developers.cloudflare.com/workers/platform/pricing/
+
+The Cloudflare GitHub installation may be authorized for **all repositories**, which is acceptable for a dedicated GitHub account. This does **not** create a Worker or GitHub API credential. Keep the **new fine-grained Actions:write token** scoped to this repository, even when Cloudflare's GitHub installation can access other repositories.
