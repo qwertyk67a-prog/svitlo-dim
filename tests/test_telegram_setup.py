@@ -15,12 +15,14 @@ def test_discovery_ignores_old_private_and_other_bot_commands():
     assert setup.recent_group_commands(updates,"MyBot",now) == [-10012]
 
 
-def test_discover_never_sends_and_does_not_print_token(monkeypatch,capsys):
+def test_discover_sends_chat_id_to_group_without_leaking_public_log(monkeypatch,capsys):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN","private-token")
     monkeypatch.setenv("SETUP_MODE","discover")
     calls=[]
     def fake(token,method,**kwargs):
-        calls.append(method)
+        calls.append((method,kwargs))
+        if method=="sendMessage":
+            return {"message_id":14}
         if method=="getMe":
             return {"is_bot":True,"username":"MyBot"}
         if method=="getUpdates":
@@ -29,9 +31,11 @@ def test_discover_never_sends_and_does_not_print_token(monkeypatch,capsys):
     monkeypatch.setattr(setup,"call_telegram",fake)
     setup.main()
     output=capsys.readouterr().out
-    assert "TELEGRAM_CHAT_ID = -100123" in output
+    assert "-100123" not in output
     assert "private-token" not in output
-    assert calls==["getMe","getUpdates"]
+    assert [x[0] for x in calls]==["getMe","getUpdates","sendMessage"]
+    assert calls[-1][1]["chat_id"]==-100123
+    assert "-100123" in calls[-1][1]["text"]
 
 
 def test_test_mode_sends_only_to_verified_group(monkeypatch):

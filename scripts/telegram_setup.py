@@ -71,7 +71,7 @@ def main():
     me = call_telegram(token, "getMe")
     if not isinstance(me, dict) or not me.get("is_bot") or not me.get("username"):
         raise SetupError("Telegram не підтвердив бота")
-    print("Бот підтверджений: @" + me["username"])
+    print("Бот підтверджено; публічний журнал не містить його імені")
     if mode == "discover":
         updates = call_telegram(
             token, "getUpdates", limit=100, timeout=0,
@@ -82,9 +82,16 @@ def main():
             raise SetupError("Команду /chatid не знайдено. Надішліть її в групу й повторіть discover")
         if len(groups) > 1:
             raise SetupError("Команда /chatid знайдена в кількох групах. Потрібне однозначне визначення")
-        print("TELEGRAM_CHAT_ID =", groups[0])
-        print("Збережіть це число в Repository secret TELEGRAM_CHAT_ID")
-        print("Увага: журнал публічного GitHub доступний стороннім")
+        # Never print chat identifiers to public GitHub Actions logs.
+        # The requesting group gets its own ID directly in Telegram.
+        call_telegram(
+            token, "sendMessage", chat_id=groups[0],
+            disable_notification="true",
+            text=("ID цієї групи: " + str(groups[0]) +
+                  "\nЗбережіть ID у GitHub Secret TELEGRAM_CHAT_ID. "
+                  "Не публікуйте токен бота."),
+        )
+        print("ID надіслано у групу Telegram; у GitHub-журналі його немає")
         return
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not re.fullmatch(r"-\d+", chat_id):
@@ -96,7 +103,7 @@ def main():
         raise SetupError("Чат не є Telegram-групою")
     call_telegram(
         token, "sendMessage", chat_id=chat_id, disable_notification="true",
-        text=("✅ Тестове повідомлення SVITLO-DIM.\n"
+        text=("✅ Тестове повідомлення бота відключень.\n"
               "З'єднання з Telegram працює. Моніторинг ще не активований."),
     )
     print("Одне тестове повідомлення надіслано. Моніторинг не активований.")

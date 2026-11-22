@@ -1,524 +1,234 @@
-"""Integration tests: one house, one recipient, persistent on-disk state."""
-import asyncio
-import json
-from datetime import datetime, timedelta
+"""Only one destination; alert delivery must remain timely or be suppressed."""
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
-
+from unittest.mock import Mock
 import pytest
-import bot
 
-KYIV=ZoneInfo("Europe/Kyiv")
+from bot import parse_verified, telegram_send
+from house_reliability import (
+    parse_reminder_minutes, due_reminders, house_queue_transition,
+    verified_house_queues, trim_state,
+)
 
-
-def fake_schedule(group="GPV6.2", days=2, has_week=False):
-    today=datetime.now(KYIV).date()
-    raw={}
-    for i in range(days):
-        day=today+timedelta(days=i)
-        stamp=str(int(datetime(day.year,day.month,day.day,tzinfo=KYIV).timestamp()))
-        raw[stamp]={group: {"1":"no","2":"yes"}}
-    return SimpleNamespace(
-        fact=SimpleNamespace(days=raw,update="12.11.2026 17:00"),
-        preset=SimpleNamespace(time_zone={"1":"00-24","2":"12-24"},
-                               is_active=has_week,groups={}),
-    ),[group]
+KYIV = ZoneInfo("Europe/Kyiv")
+DAY = date(2026, 11, 12)
+GROUP = "GPV3.1"
+LABELS = {"1": "17-18", "2": "18-19", "3": "19-20"}
 
 
-def setup(monkeypatch,path):
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN","token-for-test")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID","-100-test")
-    monkeypatch.setenv("STATE_PATH",str(path))
-    monkeypatch.setenv("DTEK_GROUP","6.2")
-    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","false")
-    monkeypatch.setenv("REMINDER_MINUTES","0")
-    monkeypatch.delenv("DTEK_ADDRESS_JSON",raising=False)
-    monkeypatch.setenv("ALLOW_UNVERIFIED_GROUP","true")
-    monkeypatch.delenv("QUEUE_APPROVAL",raising=False)
+def provider(day=DAY, active=True, possible=False, missing=False):
+    dt = datetime(day.year, day.month, day.day, tzinfo=KYIV)
+    slots = {"1": "yes", "2": ("maybe" if possible else "no") if active else "yes",
+             "3": "yes"}
+    if missing:
+        slots.pop("3")
+    fact = SimpleNamespace(days={str(int(dt.timestamp())): {GROUP: slots}})
+    preset = SimpleNamespace(time_zone=LABELS)
+    return SimpleNamespace(preset=preset, fact=fact)
 
 
-def test_successful_notification_persisted_when_next_one_fails(tmp_path,monkeypatch):
-    state_file=tmp_path/"state.json"
-    setup(monkeypatch,state_file)
-    async def load():return fake_schedule()
-    monkeypatch.setattr(bot,"get_schedule",load)
-    calls=[]
-    def send(_token,_chat,text,deadline=None):
-        calls.append(text)
-        if len(calls)==2:
-            raise RuntimeError("Network fails after first successful delivery")
-        return 1
-    monkeypatch.setattr(bot,"telegram_send",send)
-    with pytest.raises(RuntimeError,match="Помилки Telegram"):
-        asyncio.run(bot.once())
-    stored=json.loads(state_file.read_text())
-    day=datetime.now(KYIV).date()
-    assert f"{day.isoformat()}:GPV6.2" in stored
-    assert f"{(day+timedelta(days=1)).isoformat()}:GPV6.2" not in stored
-    assert len(calls)==2
+def on(hour, minute, second=0, day=DAY):
+    return datetime(day.year, day.month, day.day, hour, minute, second, tzinfo=KYIV)
 
 
-def test_unchanged_data_is_silent_across_restarts(tmp_path,monkeypatch):
-    state_file=tmp_path/"state.json"
-    setup(monkeypatch,state_file)
-    async def load():return fake_schedule(days=1)
-    monkeypatch.setattr(bot,"get_schedule",load)
-    calls=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _token,_chat,text,deadline=None:calls.append(text))
-    asyncio.run(bot.once())
-    assert len(calls)==1
-    asyncio.run(bot.once())
-    assert len(calls)==1
+def test_opt_in_default_off_and_multiple_choices():
+    for value in ("", "0", None, "   "):
+        assert parse_reminder_minutes(value) == ()
+    assert parse_reminder_minutes("5") == (5,)
+    assert parse_reminder_minutes(" 5,15,5,60 ") == (60, 15, 5)
+    for value in ("1", "10", "70", "0,5", "five", "5,", "5;15", "-5"):
+        with pytest.raises(ValueError):
+            parse_reminder_minutes(value)
 
 
-def address_entry(groups):
-    return SimpleNamespace(
-        group_ids=groups, outage_type="", start_date=None,
-        end_date=None, sub_type=None,
+def test_four_minute_grace_and_skip_late_reminder():
+    src = provider()
+    assert due_reminders(src, GROUP, on(17,54,59), (5,), {}, parse_verified) == []
+    items = due_reminders(src, GROUP, on(17,55,30), (5,), {}, parse_verified)
+    assert len(items) == 1
+    key, message, deadline = items[0]
+    assert key == "reminder:2026-11-12:GPV3.1:1080:5"
+    assert "Нагадування" in message
+    assert "17:55" not in message and "18:00" in message
+    assert deadline == on(17,59)
+    assert len(due_reminders(src, GROUP, on(17,58), (5,), {}, parse_verified)) == 1
+    assert due_reminders(src, GROUP, on(17,59), (5,), {}, parse_verified) == []
+    assert due_reminders(src, GROUP, on(18,1), (5,), {}, parse_verified) == []
+
+
+def test_no_repeat_after_a_successful_notice_and_multiple_leads():
+    src = provider()
+    earlier = due_reminders(src, GROUP, on(17,45,20), (15,5), {}, parse_verified)
+    assert len(earlier) == 1
+    state = {earlier[0][0]: {"sent": True}}
+    assert due_reminders(src, GROUP, on(17,45,40), (15,5), state, parse_verified) == []
+    later = due_reminders(src, GROUP, on(17,55,10), (15,5), state, parse_verified)
+    assert len(later) == 1
+    assert later[0][0].endswith(":5")
+
+
+def test_no_reminder_on_missing_possible_or_cancelled_schedule():
+    for src in (provider(active=False),provider(possible=True),provider(missing=True)):
+        assert due_reminders(src, GROUP, on(17,55), (5,), {}, parse_verified) == []
+
+
+def test_no_reminder_from_tentative_weekly_forecast():
+    src = provider()
+    src.fact = None
+    assert due_reminders(src, GROUP, on(17,55), (5,), {}, parse_verified) == []
+
+
+def test_tomorrow_midnight_reminder_can_be_due_today():
+    day = DAY + timedelta(days=1)
+    s = provider(day=day)
+    s.preset.time_zone = {"1":"00-01","2":"01-02","3":"02-03"}
+    stamp = next(iter(s.fact.days))
+    s.fact.days[stamp][GROUP] = {"1":"no","2":"yes","3":"yes"}
+    items = due_reminders(s,GROUP,on(23,55,10),(5,),{},parse_verified)
+    assert len(items) == 1
+    assert "00:00" in items[0][1]
+
+
+def test_initial_single_verified_queue_is_silent():
+    state = {}
+    queues, notice = house_queue_transition(state, ("GPV3.1",), GROUP)
+    assert queues == ["GPV3.1"]
+    assert notice is None
+
+
+def test_one_verified_queue_is_replaced_automatically():
+    state = {"house:groups": ["GPV3.1"]}
+    queues, notice = house_queue_transition(state, ("GPV5.1",), GROUP)
+    assert queues == ["GPV5.1"]
+    assert "Додано: 5.1" in notice
+    assert "Вилучено: 3.1" in notice
+    assert "продовжує" in notice
+    assert "Вулиця_Приклад" not in notice
+    # State must not advance before successful Telegram delivery.
+    assert state["house:groups"] == ["GPV3.1"]
+    state["house:groups"] = queues
+    _, repeated = house_queue_transition(state, ("GPV5.1",), GROUP)
+    assert repeated is None
+
+
+def test_new_queue_added_to_house_without_disabling_old_queue():
+    state = {"house:groups": ["GPV3.1"]}
+    groups, msg = house_queue_transition(state, ("GPV3.1", "GPV5.1"), GROUP)
+    assert groups == ["GPV3.1", "GPV5.1"]
+    assert "Додано: 5.1" in msg
+    assert "Вилучено" not in msg
+    assert "Актуальні черги: 3.1, 5.1" in msg
+
+
+def test_old_queue_removed_but_remaining_queue_stays_active():
+    state = {"house:groups": ["GPV3.1", "GPV5.1"]}
+    groups, msg = house_queue_transition(state, ("GPV5.1",), GROUP)
+    assert groups == ["GPV5.1"]
+    assert "Вилучено: 3.1" in msg
+    assert "Додано:" not in msg
+
+
+def test_initial_verified_queues_are_baselined_without_false_change():
+    groups, msg = house_queue_transition({}, ("GPV4.1", "GPV4.2"), GROUP)
+    assert groups == ["GPV4.1", "GPV4.2"]
+    assert msg is None
+
+
+def test_invalid_ambiguous_and_missing_groups_are_not_deletions():
+    import pytest
+    for value in ([], None, (), ["GPV3.1", "garbage"], ["4.1"]):
+        with pytest.raises(ValueError):
+            verified_house_queues(value)
+    assert verified_house_queues(["GPV3.1", "GPV5.1", "GPV3.1"]) == (
+        "GPV3.1", "GPV5.1"
     )
 
 
-def setup_address(monkeypatch):
-    monkeypatch.setenv(
-        "DTEK_ADDRESS_JSON",
-        '{"city":"місто","street":"вулиця","house":"12"}',
-    )
-    import alerts
-    current = {"queues": ["GPV6.2"]}
-
-    async def lookup(_secret):
-        return address_entry(current["queues"])
-
-    monkeypatch.setattr(alerts, "fetch_address_status", lookup)
-    return current
-
-
-def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch, state_file)
-    current = setup_address(monkeypatch)
-    current["queues"] = ["GPV6.2", "GPV5.1"]
-    requested = []
-
-    async def load(group_ids):
-        requested.append(tuple(group_ids))
-        today = datetime.now(KYIV).date()
-        stamp = str(int(datetime(today.year, today.month, today.day, tzinfo=KYIV).timestamp()))
-        source = SimpleNamespace(
-            preset=SimpleNamespace(time_zone={"1":"00-24","2":"12-24"},
-                                   is_active=False, groups={}),
-            fact=SimpleNamespace(
-                days={stamp: {
-                    "GPV6.2": {"1":"no", "2":"yes"},
-                    "GPV5.1": {"1":"yes", "2":"no"},
-                }},
-                update="12.11.2026 21:00"
-            ),
-        )
-        return source, list(group_ids)
-
-    monkeypatch.setattr(bot, "get_schedule", load)
-    calls=[]
-    monkeypatch.setattr(
-        bot, "telegram_send",
-        lambda _t, _c, text, deadline=None: calls.append(text),
-    )
-
-    asyncio.run(bot.once())
-    assert requested == [("GPV5.1", "GPV6.2")]
-    assert len(calls) == 2
-    assert sum("ДТЕК оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
-    assert any("Черга 5.1" in m and "Графік відключень" in m for m in calls)
-    assert any("Черга 6.2" in m and "Графік відключень" in m for m in calls)
-    stored = json.loads(state_file.read_text(encoding="utf-8"))
-    assert stored["house:groups"] == ["GPV5.1","GPV6.2"]
-    assert not stored.get("house:queue_hold")
-
-    asyncio.run(bot.once())
-    assert len(calls) == 2
-
-
-def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch, state_file)
-    current = setup_address(monkeypatch)
-    current["queues"] = ["GPV5.1"]
-    state_file.write_text(json.dumps({
-        "house:groups": ["GPV5.1", "GPV6.2"],
-        "2026-01-01:GPV6.2": {"status":"outages","digest":"old"},
-    }), encoding="utf-8")
-
-    async def load(group_ids):
-        return fake_schedule(group="GPV5.1", days=1)
-    monkeypatch.setattr(bot, "get_schedule", load)
-    calls=[]
-    monkeypatch.setattr(
-        bot, "telegram_send",
-        lambda _t,_c,text,deadline=None: calls.append(text)
-    )
-    asyncio.run(bot.once())
-    assert len(calls) == 2
-    assert "Вилучено: 6.2" in calls[0]
-    assert any("Черга 5.1" in m for m in calls)
-    asyncio.run(bot.once())
-    assert len(calls) == 2
-
-
-def test_missing_address_data_never_sends_false_queue_change(tmp_path, monkeypatch):
-    state_file=tmp_path/"state.json"
-    setup(monkeypatch, state_file)
-    current=setup_address(monkeypatch)
-    current["queues"]=[]
-    calls=[]
-    monkeypatch.setattr(
-        bot,"telegram_send",
-        lambda _t,_c,text,deadline=None: calls.append(text)
-    )
-    async def should_not_run(*args):
-        raise AssertionError("No queue schedule should be sent without confirmation")
-    monkeypatch.setattr(bot,"get_schedule",should_not_run)
-    with pytest.raises(RuntimeError, match="address_lookup"):
-        asyncio.run(bot.once())
-    assert calls == []
-    assert "house:groups" not in json.loads(state_file.read_text())
-
-
-def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch):
-    state_file=tmp_path/"state.json"
-    setup(monkeypatch,state_file)
-    current=setup_address(monkeypatch)
-    current["queues"]=["GPV5.1"]
-    state_file.write_text(json.dumps({"house:groups":["GPV6.2"]}),
-                          encoding="utf-8")
-    calls=[]
-    async def load(groups):
-        return fake_schedule(group="GPV5.1",days=1)
-    monkeypatch.setattr(bot,"get_schedule",load)
-
-    def send(_t,_c,text,deadline=None):
-        calls.append(text)
-        if "ДТЕК оновив черги" in text:
-            raise RuntimeError("Telegram unavailable for queue-change notice")
-    monkeypatch.setattr(bot,"telegram_send",send)
-    with pytest.raises(RuntimeError,match="Помилки Telegram"):
-        asyncio.run(bot.once())
-    assert any("Графік відключень" in x for x in calls)
-    assert json.loads(state_file.read_text())["house:groups"] == ["GPV6.2"]
-    # The schedule was delivered once; the one-time queue notice is retried.
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,text,deadline=None: calls.append(text))
-    asyncio.run(bot.once())
-    assert sum("ДТЕК оновив черги" in x for x in calls) == 2
-    assert sum("Графік відключень" in x for x in calls) == 1
-
-
-def test_migrating_old_queue_hold_does_not_pause_anymore(tmp_path,monkeypatch):
-    state_file=tmp_path/"state.json"
-    setup(monkeypatch,state_file)
-    current=setup_address(monkeypatch)
-    current["queues"]=["GPV5.1","GPV6.2"]
-    state_file.write_text(json.dumps({
-        "house:queue_hold": {
-            "groups":["GPV5.1"], "notified":True,"code":"old-code"
-        }
-    }),encoding="utf-8")
-    async def load(groups):
-        return fake_schedule(group="GPV6.2",days=1)
-    monkeypatch.setattr(bot,"get_schedule",load)
-    calls=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,text,deadline=None:calls.append(text))
-    asyncio.run(bot.once())
-    assert "house:queue_hold" not in json.loads(state_file.read_text())
-    assert not any("5.1" in m and "Додано" in m for m in calls)
-    assert any("Графік відключень" in m for m in calls)
+def test_legacy_queue_hold_not_used_for_auto_tracking():
+    state = {"house:queue_hold": {
+        "code": "secret", "groups": ["GPV5.1"], "notified": True
+    }}
+    groups, msg = house_queue_transition(state, ("GPV5.1",), GROUP)
+    assert groups == ["GPV5.1"]
+    assert msg is None  # A queue_hold alone proves no prior queue.
+    assert "secret" not in str(msg)
 
 
 
-class _FixedDatetime(datetime):
-    @classmethod
-    def now(cls, tz=None):
-        return datetime(2026, 11, 19, 20, 30, tzinfo=tz or KYIV)
+def test_old_state_pruned_without_touching_current_events():
+    state = {"2026-10-01:GPV3.1":"old",
+             "reminder:2026-10-01:GPV3.1:1080:5":{"sent":True},
+             "2026-11-12:GPV3.1":{"digest":"x"},
+             "house:queue_hold":{"code":"abc"},
+             "official:last_id":4800}
+    assert trim_state(state,DAY) == 2
+    assert "2026-11-12:GPV3.1" in state
+    assert "official:last_id" in state
+    assert "house:queue_hold" in state
 
 
-def _late_schedule(slots):
-    day=_FixedDatetime.now(KYIV).date()
-    stamp=str(int(datetime(day.year,day.month,day.day,tzinfo=KYIV).timestamp()))
-    return SimpleNamespace(
-        preset=SimpleNamespace(
-            is_active=False,
-            time_zone={"1":"00-12","2":"12-20","3":"20-24"},
-            groups={},
-        ),
-        fact=SimpleNamespace(days={stamp:{"GPV6.2":slots}},
-                             update="19.11.2026 20:28"),
-    ),["GPV6.2"]
+def test_telegram_429_retry_after_respected(monkeypatch):
+    first = Mock(status_code=429)
+    first.json.return_value={"ok":False,"parameters":{"retry_after":1}}
+    second = Mock(status_code=200)
+    second.json.return_value={"ok":True,"result":{"message_id":99}}
+    post=Mock(side_effect=[first, second])
+    sleep=Mock()
+    monkeypatch.setattr("bot.requests.post",post)
+    monkeypatch.setattr("bot.time.sleep",sleep)
+    assert telegram_send("test-token","-123","<b>Тест</b>") == 99
+    assert post.call_count == 2
+    sleep.assert_called_once_with(1)
 
 
-def _late_test_setup(tmp_path,monkeypatch,initial):
-    path=tmp_path/"late_state.json"
-    setup(monkeypatch,path)
-    monkeypatch.setattr(bot,"datetime",_FixedDatetime)
-    current={"source":initial}
-    async def load():
-        return _late_schedule(current["source"])
-    monkeypatch.setattr(bot,"get_schedule",load)
-    sent=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,body,deadline=None:sent.append(body))
-    return path,current,sent
+def test_telegram_429_very_long_wait_not_retried(monkeypatch):
+    response=Mock(status_code=429)
+    response.json.return_value={"parameters":{"retry_after":120}}
+    post=Mock(return_value=response)
+    monkeypatch.setattr("bot.requests.post",post)
+    with pytest.raises(RuntimeError,match="120"):
+        telegram_send("private-token","-123","Тест")
+    assert post.call_count == 1
 
 
-def test_outage_published_after_it_ended_is_silent(tmp_path,monkeypatch):
-    path,current,sent=_late_test_setup(
-        tmp_path,monkeypatch,
-        {"1":"no","2":"no","3":"yes"},
-    )
-    asyncio.run(bot.once())
-    asyncio.run(bot.once())
-    assert sent == []
-    state=json.loads(path.read_text())
-    key="2026-11-19:GPV6.2"
-    assert state[key]["status"]=="historical_only"
-    # The next update adds an ongoing outage. Only that new information matters.
-    current["source"]={"1":"no","2":"no","3":"no"}
-    asyncio.run(bot.once())
-    assert len(sent)==1
-    assert "Графік відключень" in sent[0]
-    assert "час відключення вже настав" in sent[0]
+def test_reminder_never_sent_after_deadline(monkeypatch):
+    post=Mock()
+    monkeypatch.setattr("bot.requests.post",post)
+    with pytest.raises(RuntimeError,match="минув"):
+        telegram_send("private-token","-123","Тест",deadline=on(0,0))
+    post.assert_not_called()
 
 
-def test_outage_start_past_but_end_future_triggers_notice(tmp_path,monkeypatch):
-    path,current,sent=_late_test_setup(
-        tmp_path,monkeypatch,
-        {"1":"yes","2":"yes","3":"no"},
-    )
-    asyncio.run(bot.once())
-    assert len(sent)==1
-    assert "20:00–24:00" in sent[0]
-    assert "час відключення вже настав" in sent[0]
+
+def test_cached_queue_timestamp_must_be_recent_and_timezone_aware():
+    from house_reliability import cached_queue_is_fresh
+    now = on(15, 0)
+    assert cached_queue_is_fresh((now - timedelta(hours=23)).isoformat(), now)
+    assert not cached_queue_is_fresh((now - timedelta(hours=25)).isoformat(), now)
+    assert not cached_queue_is_fresh((now + timedelta(minutes=2)).isoformat(), now)
+    assert not cached_queue_is_fresh(now.replace(tzinfo=None).isoformat(), now)
+    assert not cached_queue_is_fresh("not-a-date", now)
+    assert not cached_queue_is_fresh(None, now)
 
 
-def test_past_only_change_does_not_repeat_sent_ongoing_schedule(tmp_path,monkeypatch):
-    path,current,sent=_late_test_setup(
-        tmp_path,monkeypatch,
-        {"1":"no","2":"yes","3":"no"},
-    )
-    asyncio.run(bot.once())
-    assert len(sent)==1
-    current["source"]={"1":"yes","2":"yes","3":"no"}
-    asyncio.run(bot.once())
-    assert len(sent)==1
-    asyncio.run(bot.once())
-    assert len(sent)==1
-
-
-def test_today_schedule_removes_active_outage_and_notifies(tmp_path,monkeypatch):
-    path,current,sent=_late_test_setup(
-        tmp_path,monkeypatch,
-        {"1":"yes","2":"yes","3":"no"},
-    )
-    asyncio.run(bot.once())
-    assert len(sent)==1
-    current["source"]={"1":"no","2":"yes","3":"yes"}
-    asyncio.run(bot.once())
-    assert len(sent)==2
-    assert "На решту дня" in sent[1]
-    assert "скасовано" in sent[1]
-    asyncio.run(bot.once())
-    assert len(sent)==2
-
-
-def test_only_old_finished_outage_added_to_new_graph_no_notice(
-        tmp_path,monkeypatch):
-    path,current,sent=_late_test_setup(
-        tmp_path,monkeypatch,
-        {"1":"yes","2":"yes","3":"yes"},
-    )
-    asyncio.run(bot.once())
-    assert sent == []
-    current["source"]={"1":"no","2":"yes","3":"yes"}
-    asyncio.run(bot.once())
-    assert sent == []
-
-
-def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
-    """The address endpoint is not a single point of failure."""
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch, state_file)
-    setup_address(monkeypatch)
-    import alerts
-    async def unavailable(_secret):
-        raise RuntimeError("DTEK temporary error")
-    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
-    state_file.write_text(json.dumps({"house:groups": ["GPV6.2"]}), encoding="utf-8")
-    checked = []
-    async def schedules(groups):
-        checked.append(groups)
-        return fake_schedule(days=1)
-    monkeypatch.setattr(bot, "get_schedule", schedules)
-    messages = []
-    monkeypatch.setattr(bot, "telegram_send",
-                        lambda _t, _c, msg, deadline=None: messages.append(msg))
-    asyncio.run(bot.once())
-    assert checked == [("GPV6.2",)]
-    assert len(messages) == 1
-
-
-def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch, state_file)
-    setup_address(monkeypatch)
-    import alerts
-    async def unavailable(_secret):
-        raise RuntimeError("DTEK temporary error")
-    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
-    called = []
-    async def schedules(*args):
-        called.append(args)
-        return fake_schedule()
-    monkeypatch.setattr(bot, "get_schedule", schedules)
-    with pytest.raises(RuntimeError, match="address_lookup"):
-        asyncio.run(bot.once())
-    assert called == []
-
-
-def test_no_address_is_disabled_unless_explicitly_approved(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch, state_file)
-    monkeypatch.delenv("ALLOW_UNVERIFIED_GROUP")
-    called = []
-    async def schedules(*args):
-        called.append(args)
-        return fake_schedule()
-    monkeypatch.setattr(bot, "get_schedule", schedules)
-    with pytest.raises(RuntimeError, match="DTEK_ADDRESS_JSON"):
-        asyncio.run(bot.once())
-    assert called == []
-
-
-def test_dry_run_never_sends_telegram(tmp_path, monkeypatch):
-    state_file = tmp_path / "dry-run-only.json"
-    setup(monkeypatch, state_file)
-    monkeypatch.setenv("DRY_RUN", "true")
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    async def schedules():
-        return fake_schedule(days=1)
-    monkeypatch.setattr(bot, "get_schedule", schedules)
-    monkeypatch.setattr(bot, "telegram_send",
-                        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                            AssertionError("DRY_RUN must never send")))
-    asyncio.run(bot.once())
-    assert not state_file.exists()
-
-
-def test_dry_run_does_not_change_existing_state(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch, state_file)
-    monkeypatch.setenv("DRY_RUN", "true")
-    state_file.write_text('{"unchanged": true}', encoding="utf-8")
-    async def schedules():
-        return fake_schedule(days=1)
-    monkeypatch.setattr(bot, "get_schedule", schedules)
-    monkeypatch.setattr(bot, "telegram_send",
-                        lambda *_a, **_k: (_ for _ in ()).throw(
-                            AssertionError("No Telegram calls in dry-run")))
-    asyncio.run(bot.once())
-    assert json.loads(state_file.read_text()) == {"unchanged": True}
-
-
-def test_active_emergency_marks_daily_schedule_as_conditional(tmp_path,monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch,state_file)
-    state_file.write_text(json.dumps({
-        "official:status:emergency:region":{"status":"active"},
-    }), encoding="utf-8")
-    async def load():
-        return fake_schedule(days=1)
-    monkeypatch.setattr(bot,"get_schedule",load)
-    messages=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,txt,deadline=None: messages.append(txt))
-    asyncio.run(bot.once())
-    assert len(messages)==1
-    assert "погодинний графік може не діяти" in messages[0]
-
-
-def test_official_feed_error_marks_action_failed_after_schedule_delivery(
-        tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch,state_file)
-    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
-    setup_address(monkeypatch)
-    import alerts
-    monkeypatch.setattr(alerts,"fetch_official_page",
-                        lambda: (_ for _ in ()).throw(RuntimeError("WAF")))
-    async def load(group_ids):
-        return fake_schedule(days=1)
-    monkeypatch.setattr(bot,"get_schedule",load)
-    messages=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,txt,deadline=None: messages.append(txt))
-    with pytest.raises(RuntimeError,match="official_feed"):
-        asyncio.run(bot.once())
-    assert messages  # Valid daily GPV was not blocked by official feed outage.
-
-
-def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch,state_file)
-    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
-    monkeypatch.setenv(
-        "DTEK_ADDRESS_JSON",
-        '{"city":"м. Кривий Ріг","street":"вул. Умовна","house":"12Г"}'
-    )
-    import alerts
-    async def fail(_secret):
-        raise RuntimeError("DTEK address API offline")
-    monkeypatch.setattr(alerts, "fetch_address_status", fail)
-    now = datetime.now(KYIV)
-    def news():
-        return ('<div class="tgme_widget_message" data-post="dtek_ua/999">'
-                '<div class="tgme_widget_message_text">'
-                'Дніпропетровщина: запроваджено екстрені відключення'
-                '</div><time datetime="' + now.isoformat() + '">x</time></div>')
-    monkeypatch.setattr(alerts,"fetch_official_page",news)
-    async def should_not_fetch(*args):
-        raise AssertionError("No unverified GPV should be fetched")
-    monkeypatch.setattr(bot, "get_schedule", should_not_fetch)
-    messages=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,txt,deadline=None: messages.append(txt))
-    with pytest.raises(RuntimeError, match="address_lookup"):
-        asyncio.run(bot.once())
-    assert len(messages)==1
-    assert "екстрені" in messages[0].casefold()
-
-
-def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypatch):
-    state_file = tmp_path / "state.json"
-    setup(monkeypatch,state_file)
-    setup_address(monkeypatch)
-    import alerts
-    from types import SimpleNamespace
-    async def two_queues(_secret):
-        return SimpleNamespace(group_ids=["GPV5.1","GPV6.2"],
-                               outage_type="",start_date=None,
-                               end_date=None,sub_type=None)
-    monkeypatch.setattr(alerts,"fetch_address_status",two_queues)
-    async def load(groups):
-        source, _ = fake_schedule(days=1)
-        dt = datetime.now(KYIV).date()
-        stamp = str(int(datetime(dt.year,dt.month,dt.day,tzinfo=KYIV).timestamp()))
-        source.fact.days[stamp]["GPV5.1"] = dict(source.fact.days[stamp]["GPV6.2"])
-        return source,list(groups)
-    monkeypatch.setattr(bot,"get_schedule",load)
-    sent=[]
-    monkeypatch.setattr(bot,"telegram_send",
-                        lambda _t,_c,text,deadline=None:sent.append(text))
-    asyncio.run(bot.once())
-    schedules=[x for x in sent if "Графік відключень" in x]
-    assert len(schedules)==2
-    assert all("Розподіл квартир між чергами не підтверджено" in x for x in schedules)
+def test_prune_only_closed_dated_incidents_not_open_emergencies():
+    from house_reliability import trim_state
+    reference = date(2026, 11, 22)
+    old = "2026-10-20T14:00:00+03:00"
+    recent = "2026-11-21T14:00:00+02:00"
+    state = {
+        "official:incident:emergency:region:closed": {
+            "status": "ended", "published": old,
+        },
+        "official:incident:emergency:region:active": {
+            "status": "active", "published": old,
+        },
+        "official:incident:gav:region:recent": {
+            "status": "ended", "published": recent,
+        },
+    }
+    assert trim_state(state, reference) == 1
+    assert "official:incident:emergency:region:closed" not in state
+    assert "official:incident:emergency:region:active" in state
+    assert "official:incident:gav:region:recent" in state

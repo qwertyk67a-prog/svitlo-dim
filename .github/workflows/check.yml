@@ -1,4 +1,4 @@
-name: Check DTEK schedule
+name: Check power schedule
 on:
   workflow_dispatch:
   schedule:
@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: dtek-outage-monitor
+  group: power-outage-monitor
   cancel-in-progress: false
 jobs:
   check:
@@ -18,16 +18,14 @@ jobs:
         shell: bash
         env:
           CONFIGURED_BOT_ENABLED: ${{ vars.BOT_ENABLED }}
-          SVITLO_RELEASE_PAUSE: "true"
         run: |
-          if [[ "$SVITLO_RELEASE_PAUSE" == "true" ]]; then
-            echo "active=false" >> "$GITHUB_OUTPUT"
-            echo "SVITLO_RELEASE_PAUSE_V1: no Telegram notifications during migration"
-            exit 0
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Production Telegram delivery is allowed only on main"
+            exit 1
           fi
           if [[ "$CONFIGURED_BOT_ENABLED" =~ ^[[:space:]]*true[[:space:]]*$ ]]; then
             echo "active=true" >> "$GITHUB_OUTPUT"
-            echo "BOT_ENABLED is exactly true; continuing with DTEK"
+            echo "BOT_ENABLED is exactly true; continuing with configured operator"
           else
             echo "active=false" >> "$GITHUB_OUTPUT"
             if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
@@ -51,7 +49,7 @@ jobs:
       - name: Verify installed dependency compatibility
         if: steps.gate.outputs.active == 'true'
         run: python -m pip check
-      - name: Cache Chromium for DTEK WAF fallback
+      - name: Cache Chromium for provider browser fallback
         if: steps.gate.outputs.active == 'true'
         id: chromium-cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -61,57 +59,31 @@ jobs:
       - name: Install Chromium on cache miss
         if: steps.gate.outputs.active == 'true' && steps.chromium-cache.outputs.cache-hit != 'true'
         run: python -m playwright install --with-deps chromium
-      - name: Read DTEK and notify Telegram
+      - name: Load notification state from isolated branch
+        if: steps.gate.outputs.active == 'true'
+        id: load_state
+        env:
+          REPOSITORY_STATE_TOKEN: ${{ github.token }}
+          REPOSITORY_STATE_BRANCH: bot-state
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
+          STATE_PATH: bot_state.json
+        run: python -m scripts.repo_state load
+      - name: Read configured source and notify Telegram
         if: steps.gate.outputs.active == 'true'
         id: notify
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '0' }}
-          DTEK_WAF_BROWSER: "1"
           ANNOUNCEMENTS_ENABLED: ${{ vars.ANNOUNCEMENTS_ENABLED || 'true' }}
-          DTEK_ADDRESS_JSON: ${{ secrets.DTEK_ADDRESS_JSON }}
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           STATE_PATH: bot_state.json
         run: python bot.py --once
-      - name: Save notification state even if later notifications fail
-        if: always() && steps.gate.outputs.active == 'true' && steps.notify.outcome != 'skipped'
+      - name: Save notification state to isolated branch
+        if: always() && steps.gate.outputs.active == 'true' && steps.load_state.outcome == 'success' && steps.notify.outcome != 'skipped'
         env:
-          GITHUB_STATE_PUSH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ -f bot_state.json ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -f bot_state.json
-            if ! git diff --cached --quiet; then
-              git commit -m "Store notification state [skip ci]"
-              # Do not persist the write-capable GitHub token in checkout.
-              # Only the state-saving step receives this token.
-              cat > "$RUNNER_TEMP/svitlo-askpass" <<'ASKPASS'
-          #!/bin/sh
-          case "$1" in
-            *Username*) printf '%s' 'x-access-token' ;;
-            *Password*) printf '%s' "$GITHUB_STATE_PUSH_TOKEN" ;;
-          esac
-          ASKPASS
-              chmod 700 "$RUNNER_TEMP/svitlo-askpass"
-              # Retry non-fast-forward races with ordinary code commits.
-              # A conflicting state edit is a hard error, never overwritten.
-              for attempt in 1 2 3; do
-                if GIT_ASKPASS="$RUNNER_TEMP/svitlo-askpass" GIT_TERMINAL_PROMPT=0 \
-                  git push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:main; then
-                  exit 0
-                fi
-                if [[ "$attempt" == 3 ]]; then
-                  echo "State push failed after 3 attempts" >&2
-                  exit 1
-                fi
-                GIT_ASKPASS="$RUNNER_TEMP/svitlo-askpass" GIT_TERMINAL_PROMPT=0 \
-                  git fetch "https://github.com/$GITHUB_REPOSITORY.git" main
-                git rebase FETCH_HEAD || {
-                  git rebase --abort || true
-                  echo "State merge conflict; refusing to discard notifications" >&2
-                  exit 1
-                }
-              done
-            fi
-          fi
+          REPOSITORY_STATE_TOKEN: ${{ github.token }}
+          REPOSITORY_STATE_BRANCH: bot-state
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
+          STATE_PATH: bot_state.json
+        run: python -m scripts.repo_state save

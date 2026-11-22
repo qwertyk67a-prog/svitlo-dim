@@ -3,6 +3,21 @@ on:
   push:
     paths:
       - bot.py
+      - power_config.py
+      - provider_transport.py
+      - scripts/verify_address.py
+      - scripts/repo_state.py
+      - scripts/migrate_checkpoint.py
+      - scripts/state_crypto.py
+      - scripts/monitor_health.py
+      - scripts/preflight_migration.py
+      - .github/workflows/preflight-migration.yml
+      - .github/workflows/monitor-health.yml
+      - .github/workflows/migrate-checkpoint.yml
+      - deploy/cloudflare-dispatcher/**
+      - scripts/verify_source_tables.py
+      - .github/workflows/verify-address.yml
+      - .github/workflows/verify-source-tables.yml
       - house_reliability.py
       - alerts.py
       - event_scope.py

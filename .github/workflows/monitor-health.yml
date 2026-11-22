@@ -1,0 +1,24 @@
+name: Monitor health (read-only)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: svitlo-health
+  cancel-in-progress: false
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify successful production monitor within 20 minutes
+        env:
+          BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m scripts.monitor_health

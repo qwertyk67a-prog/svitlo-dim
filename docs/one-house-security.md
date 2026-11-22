@@ -1,76 +1,26 @@
-# Безпека SVITLO для одного будинку
+# Security boundary for one-house SVITLO-DIM
 
-## Вміст коду й репозиторію
+The repository is public. Only `POWER_CONFIG_JSON`, `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_CHAT_ID`, and GitHub-issued runtime tokens belong in protected
+Secrets. Never publish their values in logs, comments, commits, or screenshots.
 
-- Код, Python-тести, робочий процес GitHub Actions та історія Git є публічними.
-- Реальна адреса повинна бути **тільки у GitHub Actions Repository Secret** `DTEK_ADDRESS_JSON`.
-- Telegram Bot Token повинен бути **тільки у GitHub Actions Repository Secret** `TELEGRAM_BOT_TOKEN`.
-- Єдиний `TELEGRAM_CHAT_ID` повинен бути Repository Secret. Він визначає один канал або групу.
-- `bot_state.json` публічний. Він містить статуси та години відключень черги, а не реальну адресу чи список мешканців.
-- Зверніть увагу: старі коміти GitHub залишаються у **історії** після видалення прикладів адрес з поточної версії. Якщо у старих комітах були дані, звичайного редагування файлів недостатньо для їх видалення. За потреби повної історичної приватності потрібен новий чистий репозиторій та ротація скомпрометованих секретів.
+The active `main` branch **still has old public notification-state commits**.
+The proposed feature version writes future `bot-state` checkpoints with
+AES-256-GCM authenticated encryption. The encryption key is derived from
+`POWER_CONFIG_JSON.state_key`. Key rotation without re-encrypting old state
+makes the checkpoint unreadable. Encryption does not retroactively remove
+historic commits. Plaintext exists transiently on an isolated Actions runner.
 
-## Хто може отримати секрет
+Do not run the live Telegram notification workflow from a feature branch.
+The feature workflow gate rejects all refs except `refs/heads/main`.
+Read-only source tests do not use Telegram Secrets.
 
-GitHub Secrets зашифровані під час зберігання та не доступні звичайним відвідувачам GitHub.
+The read-only health workflow checks recent GitHub monitor success but
+shares GitHub infrastructure. It cannot detect a complete GitHub outage
+independently and does not send Telegram administration alerts.
 
-**Не означає, що секрет недосяжний для нападника.** Людина з правом змінювати код, який запускається з секретами, або з контролем облікового запису власника/підключеного GitHub App може змінити робочий процес та спробувати переслати секрет сторонньому серверу. Вразлива стороння залежність або скомпрометований runner також є ризиком.
+Repository workflow editors with access to Actions secrets remain trusted.
+Compromised trusted code can still read those secrets at runtime. This
+cannot be mitigated by checkpoint encryption alone.
 
-Використовуйте:
-1. Унікальний пароль і двофакторну автентифікацію/passkey для GitHub.
-2. Перевірку сторонніх програм, GitHub Apps і членів із правом `write`.
-3. Перевірку кожної зміни `.github/workflows/`, `bot.py`, `alerts.py`, `requirements.txt`.
-4. Ніколи не надсилайте токен Telegram чи JSON адреси в чат, issue, PR або лог.
-5. У разі витоку токена негайно відкличте/створіть новий через BotFather і замініть GitHub Secret.
-
-Використані офіційні GitHub Actions pinned SHA, `checkout.persist-credentials: false`.
-Токен запису стану GitHub надається лише кроку `Save notification state`.
-**Це зменшує експозицію, але не гарантує захист у випадку повного виконання шкідливого коду у workflow.**
-
-`contents: write` для планового workflow поки необхідний, оскільки бот зберігає контрольні суми сповіщень у `bot_state.json` і комітить зміну до GitHub. Для повного захисту основної гілки необхідно перенести стан у окреме сховище. Це не зроблено в безплатній однобудинковій версії.
-
-## Дані користувачів Telegram
-
-У цій версії **немає бази користувачів**, списку підписників групи або історії вхідних повідомлень.
-
-Бот використовує `sendMessage` до **одного** налаштованого `chat_id`. Він не викликає Telegram API для отримання списку мешканців.
-
-Власники/адміністратори Telegram-групи можуть бачити її учасників відповідно до звичайних прав Telegram. Це не означає, що ці дані зберігаються у нашому боті.
-
-Права бота мають бути мінімальними:
-- Для каналу — публікація повідомлень, без права додавати адміністраторів або видаляти повідомлення.
-- Для групи — відправлення повідомлень, без керування учасниками та видалення їхніх повідомлень.
-- Залишайте **Privacy Mode** увімкненим у BotFather. Поточному боту не потрібне читання групової розмови.
-
-## Чи можливі віруси
-
-Звичайне повідомлення Telegram із текстом і посиланням не встановлює вірус автоматично.
-Але якщо бот захоплений, нападник може надіслати шкідливі посилання, файли чи неправдиві повідомлення від його імені.
-Ризики включають фішинг, спроби викрадення Telegram-акаунтів через підроблені сторінки та використання вразливостей клієнтських програм.
-
-Поточний бот створює **лише текстові повідомлення** з посиланнями на ДТЕК і офіційний канал ДТЕК.
-Він не має функції відправлення файлів, `web_app`, запуску виконуваного коду у користувача або отримання особистих повідомлень.
-
-## Інші ризики
-
-- Неавторизована зміна workflow чи коду після компрометації GitHub.
-- Supply-chain атака на PyPI-залежність `dtek-blackout-client` або транзитивні залежності.
-- Атака на бібліотеку `requests` / Chromium / Python, якщо немає оновлень.
-- Неправдиві офіційні повідомлення через помилки парсера або підроблене джерело.
-- Затримки чи пропущені запуски GitHub cron, блокування DTEK WAF.
-- Дублі повідомлень після невизначеного результату HTTP timeout.
-- Витік метаданих з публічного `bot_state.json` про чергу та її графіки (але без адреси).
-- Будинок на кількох чергах: бот відстежує всі черги за адресою; відповідність конкретних квартир чергам не вгадується.
-
-## Необхідні налаштування вручну
-
-У Settings → Collaborators перевірте, що сторонні особи не мають write/admin.
-У Settings → Actions → General обмежте виконання сторонніх Actions і вимкніть непотрібні дозволи.
-У Settings → Security → Dependabot перевіряйте відкриті PR з оновленнями.
-Захист `main` з обов'язковими рев'ю коду потрібно узгодити з автоматичним комітом `bot_state.json`: звичайна заборона прямого push може зупинити збереження стану.
-
-Джерела:
-- https://docs.github.com/en/actions/concepts/security/secrets
-- https://docs.github.com/en/actions/concepts/security/compromised-runners
-- https://docs.github.com/en/actions/reference/security/secure-use
-- https://core.telegram.org/bots/api
-- https://telegram.org/faq
+No paid data storage, geocoding, or monitoring service is required.

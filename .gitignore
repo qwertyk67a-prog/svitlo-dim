@@ -12,3 +12,6 @@ private/
 secrets/
 __pycache__/
 .pytest_cache/
+
+# Each installation owns its own public but pseudonymized checkpoint.
+bot_state.json
