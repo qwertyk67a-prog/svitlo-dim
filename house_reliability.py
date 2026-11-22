@@ -181,7 +181,7 @@ def trim_state(state: dict, today) -> int:
             if published < today - timedelta(days=21):
                 state.pop(key, None)
             continue
-        if key.startswith("official:incident:"):
+        if key.startswith(("official:incident:", "official:unresolved:")):
             # Retain unresolved active events until an official closure.
             # Remove old closed incidents to keep the checkpoint bounded.
             record = state.get(key)
