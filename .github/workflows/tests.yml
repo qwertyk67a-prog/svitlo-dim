@@ -10,6 +10,8 @@ on:
       - scripts/migrate_checkpoint.py
       - scripts/state_crypto.py
       - scripts/monitor_health.py
+      - scripts/preflight_migration.py
+      - .github/workflows/preflight-migration.yml
       - .github/workflows/monitor-health.yml
       - .github/workflows/migrate-checkpoint.yml
       - deploy/cloudflare-dispatcher/**
