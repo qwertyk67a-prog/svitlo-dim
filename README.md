@@ -120,8 +120,17 @@ See [Safe deployment checklist](docs/release-checklist.md). The new POWER_CONFIG
 The existing native GitHub cron can run late. The optional Cloudflare Worker
 in `deploy/cloudflare-dispatcher` dispatches checks every five minutes on
 Cloudflare Workers Free, without geocoding or hosting the Python monitor.
-The Worker is **not deployed or enabled** until the owner connects Cloudflare
-and adds an Actions:write GitHub token as a Worker Secret.
+The Worker is already deployed on the active `main` branch with
+`ENABLED=true`; continuous `workflow_dispatch` runs have been observed.
+Keep `ENABLED=true` in this feature branch to prevent disabling live Cron
+on merge. The GitHub Actions write token belongs only in the Cloudflare Secret.
+
+The separate `Monitor health (read-only)` GitHub workflow checks every 15
+minutes for a successful production monitor run within the previous 20
+minutes. It shows failure in GitHub Actions without reading Telegram tokens,
+addresses, or stored checkpoints. It is **not an independent watchdog**:
+GitHub platform failures can stop the health workflow itself. No admin
+Telegram alert is configured.
 
 The provider's official address directory determines the house's queue.
 District/quarter names from private configuration are used only when an
