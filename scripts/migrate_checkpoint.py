@@ -13,6 +13,7 @@ import tempfile
 from bot import state_write
 from power_config import checkpoint_namespace, provider_config
 from scripts.repo_state import call_api, decode_checkpoint, settings
+from scripts.state_crypto import seal_checkpoint
 
 
 def migrate_snapshot(raw, namespace):
@@ -52,7 +53,9 @@ def run():
         raise RuntimeError("Missing Telegram delivery identity")
     namespace = checkpoint_namespace(config, bot_token, chat_id)
 
-    old_state, _sha = decode_checkpoint(call_api(repository, "main", token))
+    old_state, _sha = decode_checkpoint(
+        call_api(repository, "main", token), allow_legacy=True
+    )
     existing, target_sha = decode_checkpoint(call_api(repository, branch, token))
     if existing:
         raise RuntimeError("Target state not empty: refuse overwrite")
@@ -67,10 +70,10 @@ def run():
         raise RuntimeError("Migrated state did not retain identity")
 
     payload = {
-        "message": "Migrate anonymized notification history [skip ci]",
+        "message": "Migrate encrypted notification history [skip ci]",
         "branch": branch,
         "sha": target_sha,
-        "content": base64.b64encode(data).decode("ascii"),
+        "content": base64.b64encode(seal_checkpoint(data)).decode("ascii"),
     }
     call_api(repository, branch, token, payload)
     print("Checkpoint migration completed; no Telegram notifications sent")
