@@ -67,11 +67,11 @@ def test_partial_district_and_quarter_require_private_metadata():
 def test_other_quarter_district_and_city_are_not_our_house():
     rejected = (
         "Зелений Бір: знеструмлено частину Центрального району",
-        "Зелений Бір: частково знеструмлений Довгинцівський район",
+        "Зелений Бір: частково знеструмлений Учбовий район",
         "Зелений Бір: частково знеструмлений 130 квартал",
         "Прикладщина: екстрені відключення у місті Іншоград",
         "Прикладщина: екстрені відключення тільки у Другограді",
-        "Україна: аварійні відключення тільки у Харківській області",
+        "Україна: аварійні відключення тільки у Дальній області",
     )
     assert all(not covers_house(t,FULL) for t in rejected)
 
@@ -199,3 +199,10 @@ def test_named_other_cities_without_whole_region_are_silent():
         "Прикладщина: екстрені відключення по всій області, "
         "включно з Другоградм і Південним Гаєм", FULL
     )
+
+
+def test_same_street_and_house_need_the_configured_city():
+    for prefix in ("Іншоград", "Прикладщина", "Зелений Бір та Іншоград"):
+        for address in ("вул. Умовна", "вул. Умовна, буд. 12Г"):
+            assert not covers_house(f"{prefix}: знеструмлено {address}", FULL)
+    assert covers_house("Зелений Бір: знеструмлено вул. Умовна, буд. 12Г", FULL)
