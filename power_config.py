@@ -152,6 +152,24 @@ def public_territory(config=None):
     }
 
 
+
+def _stable_address_identity(address):
+    """Normalize spelling without treating different numbered buildings as one.
+
+    District and historical quarter are metadata for territory filtering;
+    correcting either must not reset delivered-notification history.
+    """
+    city = " ".join(address["city"].casefold().split())
+    street = " ".join(address["street"].casefold().split())
+    street = re.sub(r"^(?:вул\\.?|вулиця)\\s+", "вул ", street)
+    house = re.sub(r"\\s+", "", address["house"].casefold())
+    house = house.replace("a", "а").replace("b", "в").replace("i", "і")
+    # Normalize separators only directly before a letter suffix. A numeric
+    # slash denotes a distinct building: 1/1 and 11 must remain different.
+    house = re.sub(r"(?<=\\d)[./\\-](?=[а-яіїєґ]$)", "", house)
+    return {"city": city, "street": street, "house": house}
+
+
 def checkpoint_namespace(config, bot_token="", chat_id=""):
     """Stable per-installation identity, unaffected by JSON formatting.
 
@@ -164,7 +182,7 @@ def checkpoint_namespace(config, bot_token="", chat_id=""):
         "site_url": config["site_url"],
         "ajax_url": config["ajax_url"],
         "telegram_feed": config["telegram_feed"],
-        "address": config["address"],
+        "address": _stable_address_identity(config["address"]),
         # Tokens change when credentials are rotated. They are not a stable
         # bot identity and must never erase notification deduplication state.
         "chat_id": chat_id,
