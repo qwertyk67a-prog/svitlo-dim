@@ -1,6 +1,11 @@
 name: Monitor health (read-only)
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/monitor-health.yml
+      - scripts/monitor_health.py
   schedule:
     - cron: '*/15 * * * *'
 permissions:
