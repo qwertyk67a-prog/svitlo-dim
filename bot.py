@@ -713,6 +713,24 @@ async def once():
     uncertain_gpv = any(x == "active" for x in emergency_states.values())
 
     if source:
+        # Absence of an unpublished daily table is normal. A PUBLISHED
+        # table containing unknown or incomplete slots is not: fail visibly
+        # rather than silently treating a broken table as "nothing changed".
+        if source.fact and source.preset:
+            for stamp, daily_groups in source.fact.days.items():
+                try:
+                    day = datetime.fromtimestamp(int(stamp), KYIV).date()
+                except (TypeError, ValueError, OverflowError):
+                    source_problems.append("invalid_daily_timestamp")
+                    continue
+                if day not in (today, today + timedelta(days=1)):
+                    continue
+                for group in groups:
+                    if group in daily_groups and parse_verified(
+                        daily_groups[group], source.preset.time_zone
+                    ) is None:
+                        source_problems.append("invalid_daily_fact")
+                        LOG.warning("Опублікована добова таблиця пошкоджена")
         for group in groups:
             for key, payload, kind, parts in collect_notifications(source, group, today, state):
                 digest = fingerprint(payload)
