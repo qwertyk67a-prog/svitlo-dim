@@ -642,3 +642,36 @@ def test_unresolved_official_event_is_visible_failure_but_others_deliver(
     saved = bot.state_read(state_file)
     assert saved["official:unresolved:801"]["status"] == "unresolved"
     assert saved["official:status:area:region"]["status"] == "active"
+
+
+def test_invalid_date_preserves_delivery_of_valid_day(tmp_path, monkeypatch):
+    setup(monkeypatch, tmp_path / "state.json")
+    source, groups = fake_schedule(days=1)
+    source.fact.days["invalid"] = {}
+
+    async def schedules(_groups):
+        return source, groups
+
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    sent = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda _t, _c, msg, deadline=None: sent.append(msg))
+    with pytest.raises(RuntimeError, match="invalid_daily_timestamp"):
+        asyncio.run(bot.once())
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("labels", [
+    {"1": "00-12"}, {"1": "01-24"}, {"1": "00-13", "2": "12-24"},
+])
+def test_live_schedule_rejects_incomplete_clock(monkeypatch, labels):
+    import provider_transport
+    source, groups = fake_schedule(days=1)
+    source.preset.time_zone = labels
+
+    async def load(_config):
+        return source
+
+    monkeypatch.setattr(provider_transport, "get_schedule", load)
+    with pytest.raises(RuntimeError, match="Часові інтервали"):
+        asyncio.run(bot.get_schedule(groups))

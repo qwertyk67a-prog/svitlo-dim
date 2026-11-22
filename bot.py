@@ -538,6 +538,15 @@ async def get_schedule(group_ids=None):
     source = await fetch_schedule(config)
     if not source.preset.time_zone:
         raise RuntimeError("Джерело не повернуло часові інтервали")
+    # A partial all-white table cannot establish a cancellation.
+    ranges = sorted(time_range(label) for label in source.preset.time_zone.values())
+    boundary = 0
+    for start, end in ranges:
+        if start != boundary:
+            raise RuntimeError("Часові інтервали оператора мають пропуск або перетин")
+        boundary = end
+    if boundary != 1440:
+        raise RuntimeError("Часові інтервали оператора не охоплюють повну добу")
     missing = [
         group for group in group_ids
         if group not in source.preset.groups and (
@@ -722,10 +731,11 @@ async def once():
         # table containing unknown or incomplete slots is not: fail visibly
         # rather than silently treating a broken table as "nothing changed".
         if source.fact and source.preset:
-            for stamp, daily_groups in source.fact.days.items():
+            for stamp, daily_groups in list(source.fact.days.items()):
                 try:
                     day = datetime.fromtimestamp(int(stamp), KYIV).date()
-                except (TypeError, ValueError, OverflowError):
+                except (TypeError, ValueError, OverflowError, OSError):
+                    del source.fact.days[stamp]
                     source_problems.append("invalid_daily_timestamp")
                     continue
                 if day not in (today, today + timedelta(days=1)):
