@@ -5,6 +5,7 @@ from urllib.error import HTTPError
 import pytest
 
 from scripts import repo_state
+from scripts.state_crypto import open_checkpoint, seal_checkpoint
 
 
 def test_checkpoint_read_save_uses_state_branch_only(monkeypatch, tmp_path):
@@ -34,13 +35,14 @@ def test_checkpoint_read_save_uses_state_branch_only(monkeypatch, tmp_path):
             return Response({
                 "sha": "blob-current",
                 "content": base64.b64encode(
-                    json.dumps(remote).encode("utf-8")
+                    seal_checkpoint(json.dumps(remote).encode("utf-8"))
                 ).decode(),
             })
         payload = json.loads(request.data.decode("utf-8"))
         assert payload["branch"] == "bot-state"
         assert payload["sha"] == "blob-current"
-        assert json.loads(base64.b64decode(payload["content"]))["v"] == 2
+        assert json.loads(open_checkpoint(base64.b64decode(payload["content"])))["v"] == 2
+        assert b'"v"' not in base64.b64decode(payload["content"])
         return Response({"content": {"sha": "blob-new"}})
 
     monkeypatch.setattr(repo_state, "urlopen", fake_urlopen)
@@ -66,7 +68,7 @@ def test_identical_checkpoint_is_not_written(monkeypatch, tmp_path):
     calls = []
     def fake_call(repository, branch, token, payload=None):
         calls.append(payload)
-        return {"sha":"blob", "content":base64.b64encode(b'{"v":2}').decode()}
+        return {"sha":"blob", "content":base64.b64encode(seal_checkpoint(b'{"v":2}')).decode()}
     monkeypatch.setattr(repo_state, "call_api", fake_call)
     repo_state.save()
     assert calls == [None]
@@ -83,7 +85,7 @@ def test_conflicting_checkpoint_refuses_to_overwrite(monkeypatch,tmp_path):
         calls.append(payload)
         if payload is not None:
             raise RuntimeError("GitHub checkpoint API HTTP 409")
-        return {"sha":"old", "content":base64.b64encode(b'{"v":1}').decode()}
+        return {"sha":"old", "content":base64.b64encode(seal_checkpoint(b'{"v":1}')).decode()}
     monkeypatch.setattr(repo_state, "call_api", fake_call)
     with pytest.raises(RuntimeError, match="409"):
         repo_state.save()
