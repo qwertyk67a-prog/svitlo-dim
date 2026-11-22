@@ -332,6 +332,7 @@ def region_candidates(page, state, now, scope=None):
     hashes = dict(old_hashes)
     max_id = max(p["id"] for p in posts)
     by_scope = {}
+    unresolved = []
     active_keys = _active_official_keys(state)
     for post in posts:
         pid = str(post["id"])
@@ -369,12 +370,27 @@ def region_candidates(page, state, now, scope=None):
         if key is None:
             possible = active_keys.get(group, set())
             if len(possible) > 1:
-                # Without an incident identifier or explicit start, a
-                # blanket cancellation could falsely close the wrong outage.
-                # Mark the source incomplete rather than claim restoration.
-                raise RuntimeError(
-                    "Офіційна подія без часу початку: кілька активних аварій"
-                )
+                # A notice without a dated start cannot safely close any
+                # particular incident. Publish a neutral warning, retain all
+                # active incidents, and continue parsing unrelated notices.
+                unresolved.append((
+                    post["id"], f"official:unresolved:{post['id']}",
+                    {
+                        "status": "unresolved", "post_id": post["id"],
+                        "published": post["date"].isoformat(),
+                        "content_hash": digest,
+                    },
+                    "\\n".join((
+                        "⚠️ <b>Неоднозначне уточнення аварійного режиму</b>",
+                        "Офіційне повідомлення не вказує, якої саме "
+                        "з кількох активних подій стосується зміна.",
+                        "Бот не скасовує жодну з цих подій без підтвердження.",
+                        "Це не підтверджує відновлення світла у будинку.",
+                        f'<a href="{html.escape(post["url"], quote=True)}">'
+                        f'Джерело: {html.escape(operator_label())}</a>',
+                    )),
+                ))
+                continue
             key = (next(iter(possible)) if possible else
                    f"official:status:{event['kind']}:{coverage['level']}")
         if event["status"] == "active":
@@ -383,7 +399,7 @@ def region_candidates(page, state, now, scope=None):
             active_keys.setdefault(group, set()).discard(key)
         by_scope.setdefault(key, []).append((post["id"], event))
 
-    pending = []
+    pending = list(unresolved)
     for key, candidates in by_scope.items():
         previous = state.get(key)
         previous_status = (
