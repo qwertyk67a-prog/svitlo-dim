@@ -17,6 +17,7 @@ def test_migration_removes_unknown_fields_and_previous_namespace(tmp_path):
         "official:last_id": 124,
         "official:post_hashes": {"121": "abc"},
         "official:status:emergency:region": {"status": "active", "published": "2026-11-21T14:00:00+02:00"},
+        "official:incident:gav:region:opaque": {"status": "active", "published": "2026-11-21T15:00:00+02:00"},
         "unknown:secret": "never-copy",
     }
     new = migrate_snapshot(legacy, "new-private-identity")
@@ -26,6 +27,7 @@ def test_migration_removes_unknown_fields_and_previous_namespace(tmp_path):
     assert new["2026-11-21:GPV3.1"]["digest"] == "abc"
     assert new["official:last_id"] == 124
     assert new["official:status:emergency:region"]["status"] == "active"
+    assert new["official:incident:gav:region:opaque"]["status"] == "active"
 
     file = tmp_path / "state.json"
     state_write(file, new)
