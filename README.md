@@ -81,15 +81,24 @@ trigger new queue assignments or false power restoration.
 
 ## State and security
 
-The `bot-state` GitHub branch contains the HMAC-pseudonymized JSON
-checkpoint, separate from the active `main` code branch. The repository
-already has an empty `bot-state` branch for the first installation. A
-manual one-time migration workflow preserves previous notification history
-and prevents most first-run duplicates. The public checkpoint is not encrypted.
-The private state_key also defines the namespace for each property.
-A changed configuration starts a new delivery history. Do not reuse state_key
-between unrelated properties. Previous public Git history is not erased.
-No paid hosting or encryption service has been added.
+The `bot-state` GitHub branch stores an **AES-256-GCM encrypted**
+notification checkpoint. The encryption key is derived locally from the
+random `state_key` inside private `POWER_CONFIG_JSON`. No plaintext history,
+private address, or encryption key is stored in new `bot-state` commits.
+The repository starts with an empty `bot-state` branch. The one-time manual
+migration reads legacy `main/bot_state.json` only after the old monitor is
+disabled, and writes authenticated ciphertext without sending Telegram.
+
+Keep `state_key` unchanged across routine configuration edits, token rotation,
+and migration. Changing it makes the existing ciphertext unreadable without
+the previous key; do not change it without a planned offline re-encryption.
+Use a distinct random key for each unrelated property or copied repository.
+The state is briefly plaintext on the isolated GitHub Actions runner. Prior
+public commits on `main` are **not** erased by encrypting future history.
+Only repo administrators and trusted workflow code may access Secrets.
+
+Encryption uses the existing free GitHub Actions service and the pinned
+open-source Python `cryptography` package; no paid service is required.
 
 GitHub Actions scheduling is best-effort; exact five-minute updates and
 exactly-once Telegram delivery are not guaranteed.
