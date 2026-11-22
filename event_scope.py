@@ -202,9 +202,18 @@ def coverage_for_house(announcement, scope):
 
     exception = EXCEPTION.search(text)
     affected = text[:exception.start()].strip(" ,;:.") if exception else text
+    city_named = _contains(affected, city_forms)
+    address_place_verified = (
+        city_named and not _contains(affected, territory["other_places"])
+        and not _contains(affected, territory["other_regions"])
+    )
     if _exact_house(affected, scope):
+        if not address_place_verified:
+            return None
         return {"level": "house", "partial": False, "label": "будинок"}
     if _matching_street_without_other_house(affected, scope):
+        if not address_place_verified:
+            return None
         return {"level": "street", "partial": _partial(affected),
                 "label": "вулиця будинку"}
     if re.search(
@@ -212,7 +221,6 @@ def coverage_for_house(announcement, scope):
     ):
         return None
 
-    city_named = _contains(affected, city_forms)
     region_named = _contains(affected, region_forms)
     districts = DISTRICT_NAME.findall(affected)
     if districts:
