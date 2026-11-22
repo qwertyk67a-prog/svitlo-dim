@@ -411,3 +411,27 @@ def test_weak_or_invalid_state_key_rejected(monkeypatch, bad_key):
     monkeypatch.setenv("POWER_CONFIG_JSON",json.dumps(config,ensure_ascii=False))
     with pytest.raises(ConfigurationError,match="64 random hexadecimal"):
         provider_config()
+
+
+def test_equivalent_house_spelling_and_quarter_metadata_do_not_reset_history():
+    from power_config import checkpoint_namespace
+    cfg = json.loads(json.dumps(TEST_CONFIG, ensure_ascii=False))
+    cfg["address"] = {
+        "city": "м. Кривий Ріг", "street": "вулиця Зразкова",
+        "house": "67А", "district": "Покровський район",
+        "quarter": "129 квартал",
+    }
+    baseline = checkpoint_namespace(cfg, "telegram-token", "-1001")
+    alias = json.loads(json.dumps(cfg, ensure_ascii=False))
+    alias["address"]["street"] = "вул. Зразкова"
+    alias["address"]["house"] = "67-A"
+    alias["address"]["quarter"] = "інший опис кварталу"
+    alias["address"]["district"] = "новий район"
+    assert checkpoint_namespace(alias, "new-token", "-1001") == baseline
+    for equivalent in ("67 А", "67/А", "67.А", "67-а", "67a"):
+        alias["address"]["house"] = equivalent
+        assert checkpoint_namespace(alias, "new-token", "-1001") == baseline
+    alias["address"]["house"] = "6/7А"
+    assert checkpoint_namespace(alias, "new-token", "-1001") != baseline
+    alias["address"]["house"] = "67/1"
+    assert checkpoint_namespace(alias, "new-token", "-1001") != baseline
