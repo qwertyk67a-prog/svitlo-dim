@@ -617,7 +617,9 @@ async def once():
             # One checkpoint per hour is sufficient to establish a bounded
             # fallback age without committing new state every five minutes.
             verified_hour = now.replace(minute=0, second=0, microsecond=0).isoformat()
-            if state.get("house:last_verified_at") != verified_hour:
+            if (state.get("house:last_verified_at") != verified_hour
+                    or state.get("house:verified_groups") != list(house_groups)):
+                state["house:verified_groups"] = list(house_groups)
                 state["house:last_verified_at"] = verified_hour
                 persist()
             house_snapshot, queue_change = house_queue_transition(
@@ -635,12 +637,12 @@ async def once():
             # verified queue. Otherwise an address-source outage looks healthy.
             source_problems.append("address_lookup")
             # An old or un-timestamped assignment is not safe indefinitely.
-            cached = state.get("house:groups")
+            cached = state.get("house:verified_groups", state.get("house:groups"))
             if cached and cached_queue_is_fresh(
                     state.get("house:last_verified_at"), now):
                 try:
                     house_groups = verified_house_queues(cached)
-                    house_snapshot = list(house_groups)
+                    house_snapshot, queue_change = house_queue_transition(state, house_groups)
                     LOG.warning("Тимчасово використовую перевірені черги з кешу")
                 except ValueError:
                     house_groups = None

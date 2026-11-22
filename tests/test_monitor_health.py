@@ -91,3 +91,10 @@ def test_live_health_run_uses_github_api_without_secrets_in_log(monkeypatch, cap
     out = capsys.readouterr().out
     assert "Health assessment: OK" in out
     assert "fake-monitor-token" not in out
+
+
+@pytest.mark.parametrize("value", ["", "True", "typo"])
+def test_missing_or_invalid_activation_is_visible(monkeypatch, value):
+    monkeypatch.setenv("BOT_ENABLED", value)
+    with pytest.raises(RuntimeError, match="Invalid BOT_ENABLED"):
+        monitor_health.main()
