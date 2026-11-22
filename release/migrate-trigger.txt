@@ -1,3 +1,0 @@
-MIGRATE
-Production main pause was verified before this one-time trigger.
-The migration script independently verifies the production freeze.
