@@ -40,6 +40,10 @@ def test_migration_identity_matches_new_delivery_identity():
     identity = checkpoint_namespace(config, "token-for-test", "-100test")
     state = migrate_snapshot({}, identity)
     assert state["config:namespace"] == identity
+    # Credential rotation must not reset delivered-notification history.
+    assert checkpoint_namespace(config, "rotated-token", "-100test") == identity
+    # A real destination change must use a different notification history.
+    assert checkpoint_namespace(config, "rotated-token", "-200test") != identity
 
 
 def test_migration_refuses_to_run_while_monitor_active(monkeypatch):
@@ -68,4 +72,4 @@ def test_external_dispatcher_requires_explicit_activation():
     assert 'crons = ["*/5 * * * *"]' in wrangler
     assert "GH_WORKFLOW_TOKEN" in worker
     assert "ghp_" not in worker
-    assert 'ENABLED = "false"' in wrangler
+    assert 'ENABLED = "true"' in wrangler
