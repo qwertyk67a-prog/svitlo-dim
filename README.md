@@ -111,9 +111,18 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Never copy an example key. The format validator cannot prove that an accepted key is truly random.
 
-## Before deploying this version
+## Production release status (22 November 2026)
 
-See [Safe deployment checklist](docs/release-checklist.md). The new POWER_CONFIG_JSON secret must be installed, then the feature-branch address check and dry-run must both succeed. Do not merge solely on unit tests. The current active main-branch bot remains unchanged until the release checks pass.
+PR #17 has been merged into `main` after a controlled pause and successful
+AES-GCM migration of the existing notification history. The live smoke test
+confirmed encrypted state load/save, one verified house queue, and no repeated
+old Telegram announcements. All 254 Python tests passed on the merged code.
+The deployed Cloudflare Worker still dispatches the existing `check.yml`
+every five minutes. The native GitHub schedule remains as fallback.
+
+See [Release verification](docs/release-2026-11-22.md) and
+[Safe deployment checklist](docs/release-checklist.md). The procedure in
+the checklist applies to future migrations, not to the completed rollout.
 
 ## Free scheduler and locality scope
 
@@ -122,8 +131,8 @@ in `deploy/cloudflare-dispatcher` dispatches checks every five minutes on
 Cloudflare Workers Free, without geocoding or hosting the Python monitor.
 The Worker is already deployed on the active `main` branch with
 `ENABLED=true`; continuous `workflow_dispatch` runs have been observed.
-Keep `ENABLED=true` in this feature branch to prevent disabling live Cron
-on merge. The GitHub Actions write token belongs only in the Cloudflare Secret.
+Keep `ENABLED=true` during normal operation. The GitHub Actions write
+token belongs only in the Cloudflare Secret, never in version control.
 
 The separate `Monitor health (read-only)` GitHub workflow checks every 15
 minutes for a successful production monitor run within the previous 20
