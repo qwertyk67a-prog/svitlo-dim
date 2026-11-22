@@ -30,6 +30,7 @@ def fake_schedule(group="GPV3.1", days=2, has_week=False):
 
 
 def setup(monkeypatch,path):
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN","token-for-test")
     monkeypatch.setenv("TELEGRAM_CHAT_ID","-100-test")
     monkeypatch.setenv("STATE_PATH",str(path))
@@ -708,3 +709,41 @@ def test_queue_cache_after_failed_queue_change(tmp_path, monkeypatch):
     assert checked == [("GPV3.1",), ("GPV3.1",)]
     assert len(sent) == 1
     assert bot.state_read(path)["house:groups"] == ["GPV3.1"]
+
+
+def test_compact_daily_new_cancel_resumed_and_unchanged(tmp_path, monkeypatch):
+    _, current, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes","2":"yes","3":"no"})
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", True)
+    asyncio.run(bot.once())
+    current["source"]["3"] = "yes"
+    asyncio.run(bot.once())
+    current["source"]["3"] = "no"
+    asyncio.run(bot.once())
+    asyncio.run(bot.once())
+    assert sent == [
+        "19.11.2026\nВідключення: 20:00–24:00",
+        "19.11.2026\nВідключення за графіком скасовано",
+        "19.11.2026\nВідключення: 20:00–24:00",
+    ]
+
+
+def test_compact_daily_preserves_uncertainty_and_queue():
+    day = datetime(2026, 11, 23).date()
+    spans = [(60,120,"off"), (180,240,"maybe")]
+    text = bot.compact_daily_message(day, spans, group="GPV3.1")
+    assert text == "23.11.2026 · Черга 3.1\nВідключення: 01:00–02:00\nМожливі відключення: 03:00–04:00"
+    assert bot.compact_daily_message(day, spans, conditional=True) == (
+        "23.11.2026\nМожливі відключення: 01:00–02:00, 03:00–04:00")
+
+
+@pytest.mark.parametrize("kind", ["week", "week_cancel"])
+def test_disabled_weekly_delivery_preserves_checkpoint(kind, tmp_path, monkeypatch):
+    path, _, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes","2":"yes","3":"yes"})
+    key = "week:2026-11-16:GPV3.1"
+    old = {"status":"outages","digest":"previous"}
+    seed_state(path, {key:old})
+    monkeypatch.setattr(bot, "collect_notifications",
+                        lambda *_: [(key, ("changed",), kind, ())])
+    asyncio.run(bot.once())
+    assert sent == []
+    assert bot.state_read(path)[key] == old
