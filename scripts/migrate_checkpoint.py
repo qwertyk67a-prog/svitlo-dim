@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from urllib.request import Request, urlopen
 
 from bot import state_write
 from power_config import checkpoint_namespace, provider_config
@@ -39,12 +40,55 @@ def migrate_snapshot(raw, namespace):
     return safe
 
 
+
+def live_monitor_is_frozen(repository, token):
+    """Require a verified pause in the CURRENT production workflow.
+
+    A temporary GitHub Actions gate allows a controlled upgrade even when
+    repository variables cannot be edited by the deployment connector.
+    Never trust a feature-branch marker as proof that main is paused.
+    """
+    url = (
+        "https://api.github.com/repos/" + repository +
+        "/contents/.github/workflows/check.yml?ref=main"
+    )
+    request = Request(url, headers={
+        "Authorization": "Bearer " + token,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "svitlo-release-freeze-check",
+    })
+    try:
+        with urlopen(request, timeout=15) as response:
+            payload = json.load(response)
+        raw = base64.b64decode(payload["content"], validate=False)
+        text = raw.decode("utf-8")
+    except Exception:
+        raise RuntimeError("Production pause cannot be verified") from None
+    required = (
+        'SVITLO_RELEASE_PAUSE: "true"',
+        'if [[ "$SVITLO_RELEASE_PAUSE" == "true" ]]; then',
+        'echo "active=false" >> "$GITHUB_OUTPUT"',
+        'SVITLO_RELEASE_PAUSE_V1: no Telegram notifications during migration',
+    )
+    first = text.find('if [[ "$SVITLO_RELEASE_PAUSE" == "true" ]]; then')
+    normal = text.find('if [[ "$CONFIGURED_BOT_ENABLED"')
+    if (any(item not in text for item in required)
+            or first < 0 or normal < 0 or first >= normal
+            or 'exit 0' not in text[first:normal]):
+        raise RuntimeError("Production workflow is not explicitly paused")
+    return True
+
+
 def run():
-    if os.getenv("BOT_ENABLED", "").strip().lower() != "false":
+    activation = os.getenv("BOT_ENABLED", "").strip().lower()
+    if activation not in ("true", "false"):
         raise RuntimeError("Disable the old live monitor explicitly before migration")
     if os.getenv("CONFIRM_MIGRATION") != "MIGRATE":
         raise RuntimeError("Explicit manual confirmation required")
     repository, branch, token, _path = settings()
+    if activation == "true" and not live_monitor_is_frozen(repository, token):
+        raise RuntimeError("Disable the old live monitor before migration")
     if branch != "bot-state":
         raise RuntimeError("Unexpected target checkpoint branch")
     config = provider_config()
