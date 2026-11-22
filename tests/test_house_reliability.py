@@ -738,7 +738,7 @@ def test_compact_daily_preserves_uncertainty_and_queue():
 
 @pytest.mark.parametrize("kind", ["week", "week_cancel"])
 def test_disabled_weekly_delivery_preserves_checkpoint(kind, tmp_path, monkeypatch):
-    path, _, sent = _late_test_setup(tmp_path, monkeypatch, {})
+    path, _, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes","2":"yes","3":"yes"})
     key = "week:2026-11-16:GPV3.1"
     old = {"status":"outages","digest":"previous"}
     seed_state(path, {key:old})
