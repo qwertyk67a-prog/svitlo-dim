@@ -642,3 +642,69 @@ def test_unresolved_official_event_is_visible_failure_but_others_deliver(
     saved = bot.state_read(state_file)
     assert saved["official:unresolved:801"]["status"] == "unresolved"
     assert saved["official:status:area:region"]["status"] == "active"
+
+
+def test_invalid_date_preserves_delivery_of_valid_day(tmp_path, monkeypatch):
+    setup(monkeypatch, tmp_path / "state.json")
+    source, groups = fake_schedule(days=1)
+    source.fact.days["invalid"] = {}
+
+    async def schedules(_groups):
+        return source, groups
+
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    sent = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda _t, _c, msg, deadline=None: sent.append(msg))
+    with pytest.raises(RuntimeError, match="invalid_daily_timestamp"):
+        asyncio.run(bot.once())
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("labels", [
+    {"1": "00-12"}, {"1": "01-24"}, {"1": "00-13", "2": "12-24"},
+])
+def test_live_schedule_rejects_incomplete_clock(monkeypatch, labels):
+    import provider_transport
+    source, groups = fake_schedule(days=1)
+    source.preset.time_zone = labels
+
+    async def load(_config):
+        return source
+
+    monkeypatch.setattr(provider_transport, "get_schedule", load)
+    with pytest.raises(RuntimeError, match="Часові інтервали"):
+        asyncio.run(bot.get_schedule(groups))
+
+
+def test_queue_cache_after_failed_queue_change(tmp_path, monkeypatch):
+    import alerts
+    path = tmp_path / "state.json"
+    setup(monkeypatch, path)
+    seed_state(path, {"house:groups": ["GPV2.1"]})
+    checked = []
+
+    async def schedules(groups):
+        checked.append(groups)
+        return fake_schedule(days=0)
+
+    def failed(*args, **kwargs):
+        raise RuntimeError("Delivery failed")
+
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    monkeypatch.setattr(bot, "telegram_send", failed)
+    with pytest.raises(RuntimeError, match="Помилки Telegram"):
+        asyncio.run(bot.once())
+
+    async def unavailable(_address):
+        raise RuntimeError("Address endpoint unavailable")
+
+    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
+    sent = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda _t, _c, msg, deadline=None: sent.append(msg))
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
+    assert checked == [("GPV3.1",), ("GPV3.1",)]
+    assert len(sent) == 1
+    assert bot.state_read(path)["house:groups"] == ["GPV3.1"]

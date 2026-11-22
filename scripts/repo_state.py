@@ -101,8 +101,9 @@ def write_atomic(path, content):
 
 def load():
     repository, branch, token, path = settings()
-    state, _sha = decode_checkpoint(call_api(repository, branch, token))
+    state, sha = decode_checkpoint(call_api(repository, branch, token))
     write_atomic(path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+    write_atomic(path.with_name(path.name + ".revision"), sha)
     print("Checkpoint loaded from isolated state branch")
 
 
@@ -123,6 +124,9 @@ def save():
     if remote == state:
         print("Checkpoint unchanged")
         return
+    revision_path = path.with_name(path.name + ".revision")
+    if not revision_path.is_file() or revision_path.read_text(encoding="utf-8") != sha:
+        raise RuntimeError("Remote checkpoint changed since load or base revision missing")
     payload = {
         "message": "Store isolated notification checkpoint [skip ci]",
         "branch": branch,

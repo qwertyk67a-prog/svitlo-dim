@@ -538,6 +538,15 @@ async def get_schedule(group_ids=None):
     source = await fetch_schedule(config)
     if not source.preset.time_zone:
         raise RuntimeError("Джерело не повернуло часові інтервали")
+    # A partial all-white table cannot establish a cancellation.
+    ranges = sorted(time_range(label) for label in source.preset.time_zone.values())
+    boundary = 0
+    for start, end in ranges:
+        if start != boundary:
+            raise RuntimeError("Часові інтервали оператора мають пропуск або перетин")
+        boundary = end
+    if boundary != 1440:
+        raise RuntimeError("Часові інтервали оператора не охоплюють повну добу")
     missing = [
         group for group in group_ids
         if group not in source.preset.groups and (
@@ -608,7 +617,9 @@ async def once():
             # One checkpoint per hour is sufficient to establish a bounded
             # fallback age without committing new state every five minutes.
             verified_hour = now.replace(minute=0, second=0, microsecond=0).isoformat()
-            if state.get("house:last_verified_at") != verified_hour:
+            if (state.get("house:last_verified_at") != verified_hour
+                    or state.get("house:verified_groups") != list(house_groups)):
+                state["house:verified_groups"] = list(house_groups)
                 state["house:last_verified_at"] = verified_hour
                 persist()
             house_snapshot, queue_change = house_queue_transition(
@@ -626,12 +637,12 @@ async def once():
             # verified queue. Otherwise an address-source outage looks healthy.
             source_problems.append("address_lookup")
             # An old or un-timestamped assignment is not safe indefinitely.
-            cached = state.get("house:groups")
+            cached = state.get("house:verified_groups", state.get("house:groups"))
             if cached and cached_queue_is_fresh(
                     state.get("house:last_verified_at"), now):
                 try:
                     house_groups = verified_house_queues(cached)
-                    house_snapshot = list(house_groups)
+                    house_snapshot, queue_change = house_queue_transition(state, house_groups)
                     LOG.warning("Тимчасово використовую перевірені черги з кешу")
                 except ValueError:
                     house_groups = None
@@ -722,10 +733,11 @@ async def once():
         # table containing unknown or incomplete slots is not: fail visibly
         # rather than silently treating a broken table as "nothing changed".
         if source.fact and source.preset:
-            for stamp, daily_groups in source.fact.days.items():
+            for stamp, daily_groups in list(source.fact.days.items()):
                 try:
                     day = datetime.fromtimestamp(int(stamp), KYIV).date()
-                except (TypeError, ValueError, OverflowError):
+                except (TypeError, ValueError, OverflowError, OSError):
+                    del source.fact.days[stamp]
                     source_problems.append("invalid_daily_timestamp")
                     continue
                 if day not in (today, today + timedelta(days=1)):

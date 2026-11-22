@@ -50,9 +50,12 @@ def analyze(runs, now, max_age_seconds=MAX_AGE_SECONDS):
 
 
 def main():
-    if os.getenv("BOT_ENABLED", "").strip().lower() != "true":
+    activation = os.getenv("BOT_ENABLED", "").strip()
+    if activation == "false":
         print("Health check skipped: production bot intentionally disabled")
         return
+    if activation != "true":
+        raise RuntimeError("Invalid BOT_ENABLED setting")
     repo = os.getenv("GITHUB_REPOSITORY", "")
     token = os.getenv("GITHUB_TOKEN", "")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) or not token:

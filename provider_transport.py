@@ -84,11 +84,14 @@ def parse_homes(raw):
         raise RuntimeError("Invalid provider address directory")
     data = raw["data"]
     if isinstance(data, list):
-        data = {
-            str(row.get("num") or row.get("house_num") or row.get("name")): row
-            for row in data if isinstance(row, dict)
-            and (row.get("num") or row.get("house_num") or row.get("name"))
-        }
+        by_number = {}
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            number = row.get("num") or row.get("house_num") or row.get("name")
+            if number:
+                by_number.setdefault(str(number), []).append(row)
+        data = by_number
     homes = {}
     for number, values in data.items():
         records = ([values] if isinstance(values, dict)

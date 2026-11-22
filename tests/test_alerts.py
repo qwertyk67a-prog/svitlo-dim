@@ -837,3 +837,18 @@ def test_dated_active_then_ended_in_same_batch_is_not_late_news():
                         "Початок: 08.11.2026 14:00"),
     ]), state, NOW)
     assert not [row for row in notices if row[3]]
+
+
+def test_unplanned_repairs_are_not_reported_as_planned():
+    assert address_event(house(reason="Аварійний ремонт"))["category"] == "fault"
+    for reason in ("Позапланові роботи", "Ремонт кабелю"):
+        assert address_event(house(reason=reason))["category"] == "unclassified"
+
+
+def test_date_only_end_keeps_active_record_after_disappearance():
+    current = house(reason="Аварійні роботи", start="08.11.2026 10:00",
+                    end="08.11.2026")
+    rows = address_decision(current, {}, NOW)
+    assert any("час початку вже минув" in (row[3] or "") for row in rows)
+    state = {key: value for _, key, value, _ in rows}
+    assert not address_decision(house(), state, NOW)

@@ -87,6 +87,7 @@ def test_conflicting_checkpoint_refuses_to_overwrite(monkeypatch,tmp_path):
             raise RuntimeError("GitHub checkpoint API HTTP 409")
         return {"sha":"old", "content":base64.b64encode(seal_checkpoint(b'{"v":1}')).decode()}
     monkeypatch.setattr(repo_state, "call_api", fake_call)
+    (tmp_path / "state.json.revision").write_text("old", encoding="utf-8")
     with pytest.raises(RuntimeError, match="409"):
         repo_state.save()
     assert len(calls) == 2
@@ -105,3 +106,23 @@ def test_missing_remote_state_does_not_fall_back_to_empty(monkeypatch):
     monkeypatch.setattr(repo_state,"urlopen",missing)
     with pytest.raises(RuntimeError, match="HTTP 404"):
         repo_state.call_api("test-user/svitlo-example","bot-state","test-token")
+
+
+def test_changed_remote_since_load_is_preserved(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "test-user/example")
+    monkeypatch.setenv("REPOSITORY_STATE_TOKEN", "test-token")
+    monkeypatch.setenv("STATE_PATH", "state.json")
+    revision = {"sha": "first", "content": base64.b64encode(b"{}").decode()}
+
+    def read_only(repository, branch, token, payload=None):
+        assert payload is None
+        return revision
+
+    monkeypatch.setattr(repo_state, "call_api", read_only)
+    repo_state.load()
+    (tmp_path / "state.json").write_text('{"local": 1}', encoding="utf-8")
+    revision.update(sha="second", content=base64.b64encode(
+        seal_checkpoint(b'{"other": 1}')).decode())
+    with pytest.raises(RuntimeError, match="changed since load"):
+        repo_state.save()

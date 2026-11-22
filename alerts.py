@@ -595,6 +595,12 @@ def parse_provider_date(raw):
     return None
 
 
+def exact_provider_time(raw):
+    if not raw or ":" not in str(raw):
+        return None
+    return parse_provider_date(raw)
+
+
 def address_event(entry):
     reason = str(entry.sub_type or "").strip()
     beginning = str(entry.start_date or "").strip()
@@ -602,10 +608,13 @@ def address_event(entry):
     outage_type = str(entry.outage_type or "")
     if not (reason or beginning or ending):
         return None
-    if outage_type == "1" or "планов" in reason.casefold() or "ремонт" in reason.casefold():
-        category = "repair"
-    elif "авар" in reason.casefold() or "пошкодж" in reason.casefold():
+    description = reason.casefold()
+    if "авар" in description or "пошкодж" in description:
         category = "fault"
+    elif re.search(r"\b(?:позапланов|непланов|незапланован)", description):
+        category = "unclassified"
+    elif outage_type == "1" or re.search(r"\bпланов", description):
+        category = "repair"
     else:
         category = "unclassified"
     return {
@@ -631,15 +640,9 @@ def address_message(event, changed=False, now=None):
     title = ("🔄 <b>Оновлено дані щодо відключення</b>" if changed
              else titles[event["category"]])
     lines = [title]
-    start = parse_provider_date(event["start"])
-    finish = parse_provider_date(event["end"])
-    # A date without a clock time does not establish an exact start moment.
-    has_exact_start = bool(re.fullmatch(
-        r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["start"]
-    ))
-    already_started = bool(now and has_exact_start and start and
-                           start < now and (not finish or finish > now))
-    if already_started:
+    start = exact_provider_time(event["start"])
+    finish = exact_provider_time(event["end"])
+    if now and start and start < now and (not finish or finish > now):
         lines.append(
             f"⚠️ За даними {op}, зазначений час початку вже минув. "
             "Відключення могло початися до отримання цього повідомлення."
@@ -686,13 +689,9 @@ def address_decision(entry, state, now, expected=None):
     old = state.get(key)
     event = address_event(entry)
     old_active = isinstance(old, dict) and old.get("status") == "active"
-    old_end = parse_provider_date(old.get("end")) if old_active else None
+    old_end = exact_provider_time(old.get("end")) if old_active else None
     # A date without a clock time is NOT evidence of an ended event.
-    exact_end = bool(event and re.fullmatch(
-        r"(?:\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}|"
-        r"\d{2}:\d{2} \d{2}\.\d{2}\.\d{4})", event["end"]
-    ))
-    finish = parse_provider_date(event["end"]) if exact_end else None
+    finish = exact_provider_time(event["end"]) if event else None
     if event and finish and finish <= now:
         if old_active and old_end and old_end > now:
             # provider explicitly revised the estimate to a time already past.
@@ -723,7 +722,7 @@ def address_decision(entry, state, now, expected=None):
                 "end": event["end"],
                 "status": "active",
             }, address_message(event, changed=old_active, now=now)))
-    elif not exact_end and old_active and old_end and old_end <= now:
+    elif not finish and old_active and old_end and old_end <= now:
         # Disappearance from the address API is NOT proof of cancellation.
         # Expire an elapsed estimate silently, without claiming restoration.
         result.append(("address", key, {

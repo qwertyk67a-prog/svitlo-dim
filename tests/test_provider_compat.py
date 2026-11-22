@@ -435,3 +435,12 @@ def test_equivalent_house_spelling_and_quarter_metadata_do_not_reset_history():
     assert checkpoint_namespace(alias, "new-token", "-1001") != baseline
     alias["address"]["house"] = "67/1"
     assert checkpoint_namespace(alias, "new-token", "-1001") != baseline
+
+
+def test_list_directory_keeps_multiple_rows_for_one_house():
+    parsed = parse_homes({"data": [
+        {"num": "42", "sub_type_reason": ["GPV3.1"], "sub_type": "ремонт"},
+        {"house_num": "42", "sub_type_reason": ["GPV2.1"]},
+    ]})
+    assert parsed.houses["42"].group_ids == ["GPV3.1", "GPV2.1"]
+    assert parsed.houses["42"].sub_type == "ремонт"
