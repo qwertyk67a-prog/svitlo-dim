@@ -40,6 +40,17 @@ Keep the native GitHub cron as a fallback. Do not confuse the Cloudflare
 4. These calls do not send Telegram messages or overwrite the checkpoint.
 5. If the service or configured address is ambiguous, do not switch.
 
+## 3A. Read-only real checkpoint preflight (completed 22 November)
+
+The feature-branch workflow **Preview legacy checkpoint migration (no writes)**
+read the active `main/bot_state.json` with `contents: read` permissions.
+It verified HMAC queue normalization, encrypted AES-GCM round-trip and
+checkpoint identity without Telegram messages or repository writes.
+Observed: 8 legacy records and 9 prepared records (one private namespace
+reference added). Workflow run: `45020172180`. Repeat this preview immediately
+before freezing the old bot; it cannot guarantee the state will not change
+before cutover.
+
 ## 4. Freeze, migrate and switch (manual short outage)
 
 1. In Settings → Secrets and variables → Actions → Variables, set
