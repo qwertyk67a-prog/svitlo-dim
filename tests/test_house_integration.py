@@ -210,3 +210,25 @@ def test_cached_queue_timestamp_must_be_recent_and_timezone_aware():
     assert not cached_queue_is_fresh(now.replace(tzinfo=None).isoformat(), now)
     assert not cached_queue_is_fresh("not-a-date", now)
     assert not cached_queue_is_fresh(None, now)
+
+
+def test_prune_only_closed_dated_incidents_not_open_emergencies():
+    from house_reliability import trim_state
+    reference = date(2026, 11, 22)
+    old = "2026-10-20T14:00:00+03:00"
+    recent = "2026-11-21T14:00:00+02:00"
+    state = {
+        "official:incident:emergency:region:closed": {
+            "status": "ended", "published": old,
+        },
+        "official:incident:emergency:region:active": {
+            "status": "active", "published": old,
+        },
+        "official:incident:gav:region:recent": {
+            "status": "ended", "published": recent,
+        },
+    }
+    assert trim_state(state, reference) == 1
+    assert "official:incident:emergency:region:closed" not in state
+    assert "official:incident:emergency:region:active" in state
+    assert "official:incident:gav:region:recent" in state
