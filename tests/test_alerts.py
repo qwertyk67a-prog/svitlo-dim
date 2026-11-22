@@ -800,8 +800,7 @@ def test_independent_dated_emergencies_are_not_conflated():
     assert final_notices[0][1] == remaining[0]
 
 
-def test_ambiguous_undated_closure_fails_instead_of_false_restoration():
-    import pytest
+def test_ambiguous_undated_closure_preserves_other_official_notices():
     state = {"official:last_id": 710}
     opened = scoped_candidates(html_page([
         fake_post(711, "Прикладщина: запроваджено екстрені відключення. "
@@ -812,10 +811,17 @@ def test_ambiguous_undated_closure_fails_instead_of_false_restoration():
     for _, key, record, _ in opened:
         state[key] = record
 
-    with pytest.raises(RuntimeError, match="кілька активних аварій"):
-        scoped_candidates(html_page([
-            fake_post(713, "Прикладщина: екстрені відключення скасовано"),
-        ]), state, NOW)
+    rows = scoped_candidates(html_page([
+        fake_post(713, "Прикладщина: екстрені відключення скасовано"),
+        fake_post(714, "Прикладщина: частково знеструмлено територію області"),
+    ]), state, NOW)
+    messages = [item for item in rows if item[3]]
+    assert len(messages) == 2
+    unresolved = next(item for item in messages
+                      if item[1].startswith("official:unresolved:"))
+    assert "не скасовує жодну" in unresolved[3]
+    assert "не підтверджує відновлення світла" in unresolved[3]
+    assert any(item[1].startswith("official:status:area:") for item in messages)
     assert sum(
         isinstance(v, dict) and v.get("status") == "active"
         for k, v in state.items() if k.startswith("official:incident:")
