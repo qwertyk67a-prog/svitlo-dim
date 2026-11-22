@@ -393,7 +393,8 @@ def test_checkpoint_namespace_changes_for_property_and_destination(monkeypatch):
     changed["address"]["house"]="88"
     assert checkpoint_namespace(changed,"bot-A","-1001")!=original
     assert checkpoint_namespace(config,"bot-A","-1002")!=original
-    # A credential rotation must not be treated as a new destination.\n    assert checkpoint_namespace(config,"bot-B","-1001")==original
+    # A credential rotation must not be treated as a new destination.
+    assert checkpoint_namespace(config,"bot-B","-1001")==original
     assert checkpoint_namespace(config,"bot-A","-1001")==original
 
 
