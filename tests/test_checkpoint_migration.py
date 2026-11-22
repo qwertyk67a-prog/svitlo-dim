@@ -89,12 +89,12 @@ def test_migration_requires_explicit_confirmation(monkeypatch):
 def test_external_dispatcher_requires_explicit_activation():
     root = Path(__file__).resolve().parents[1]
     worker = (root / "deploy/cloudflare-dispatcher/src/index.js").read_text()
-    wrangler = (root / "deploy/cloudflare-dispatcher/wrangler.toml").read_text()
+    config = json.loads((root / "deploy/cloudflare-dispatcher/worker-template.json").read_text())
     assert 'env.ENABLED !== "true"' in worker
-    assert 'crons = ["*/5 * * * *"]' in wrangler
+    assert config["triggers"]["crons"] == ["*/5 * * * *"]
     assert "GH_WORKFLOW_TOKEN" in worker
     assert "ghp_" not in worker
-    assert 'ENABLED = "true"' in wrangler
+    assert config["vars"]["ENABLED"] == "true"
 
 
 def test_main_release_freeze_requires_actual_production_workflow_marker(monkeypatch):

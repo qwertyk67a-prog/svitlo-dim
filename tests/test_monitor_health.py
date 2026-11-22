@@ -36,7 +36,7 @@ def test_last_success_older_than_twenty_minutes_is_failed():
 def test_nonproduction_success_does_not_hide_failed_production():
     with pytest.raises(RuntimeError, match="No completed successful"):
         monitor_health.analyze([
-            run(1, branch="feature/provider-independent-template-20261120"),
+            run(1, branch="feature/test-branch"),
             run(3, outcome="failure"),
         ], NOW)
 

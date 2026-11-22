@@ -1,18 +1,6 @@
 name: Preview legacy checkpoint migration (no writes)
 on:
   workflow_dispatch:
-  push:
-    branches: [feature/provider-independent-template-20261120]
-    paths:
-      - .github/workflows/preflight-migration.yml
-      - scripts/preflight_migration.py
-      - scripts/migrate_checkpoint.py
-      - scripts/repo_state.py
-      - scripts/state_crypto.py
-      - power_config.py
-      - bot.py
-      - requirements.txt
-      - constraints.txt
 permissions:
   contents: read
 jobs:

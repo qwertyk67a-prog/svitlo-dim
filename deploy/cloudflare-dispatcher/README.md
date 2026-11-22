@@ -1,101 +1,11 @@
-# Cloudflare Free: five-minute GitHub workflow dispatcher
+# Configure an independent five-minute scheduler
 
-This dispatcher is **already deployed and active** for the production bot.
-Keep `ENABLED=true`. The external watchdog uses its own private Telegram destination and bound KV namespace. The original
-GitHub fine-grained token stays a Cloudflare Runtime Secret.
+Use one Worker, one KV namespace and one repository per installation. Copy the default branch into a new GitHub repository without old history or the notification-state branch. Run the repository's empty-history initializer once. Configure and verify the provider and destination before activating production.
 
-## Why
+Connect the Worker to that repository's main branch in Cloudflare Workers Builds. Set the root directory to deploy/cloudflare-dispatcher and the production deploy command to `node deploy.mjs`. Disable deployments from other branches for this production project.
 
-Native GitHub scheduled workflows have been observed starting about once
-per hour despite a five-minute cron. A separate free Cloudflare Cron Trigger
-sends a workflow_dispatch request every five minutes. GitHub may still queue
-a run. Neither delivery nor exact five-minute execution is guaranteed.
+Under Build variables and secrets add the encrypted build secret WORKER_INSTALLATION_JSON. Its fields are worker (the connected Worker name), namespace (its KV namespace ID), and repository (owner/name). Use a unique Worker and KV namespace for every separate property. The script verifies the checkout before deployment. Temporary configuration supplies the Worker and KV binding. The repository is installed as the runtime Secret TARGET_REPOSITORY.
 
-At one request every five minutes, the Worker executes 288 times/day.
-This is within Cloudflare Workers Free's published 100,000 requests/day,
-assuming no unrelated account workloads exceed the allowance.
+Under Runtime variables and secrets, create GH_WORKFLOW_TOKEN (a GitHub token scoped to this repository with Actions write permission), WATCHDOG_TELEGRAM_BOT_TOKEN and WATCHDOG_TELEGRAM_CHAT_ID (the private administrator chat). During migration retain the current Worker, namespace, token and chat to preserve existing health history. The GitHub Actions secrets used for resident notifications are independent.
 
-## Deployment without paid features
-
-1. Sign in to Cloudflare and choose **Workers Free**. Do not add a paid plan.
-2. Use Workers Builds → Connect to GitHub.
-3. Select repository `qwertyk67a-prog/svitlo-dim`, branch
-   `main`, root directory
-   `deploy/cloudflare-dispatcher`. Set deployment command
-   `npx wrangler deploy`.
-4. The Wrangler project name is `svitlo-schedule-dispatcher`.
-5. In GitHub, create a fine-grained personal access token scoped **only** to
-   this repository and with **Actions: write** permission. Choose the
-   shortest practical expiration. Never publish the token.
-6. Under the Worker Settings → Variables and Secrets add:
-   - Plain variable `GH_REPOSITORY` = `qwertyk67a-prog/svitlo-dim`.
-   - Plain variable `GH_REF` = `main`.
-   - Plain variable `ENABLED` = `true` only when ready to begin dispatches.
-   - **Encrypted secret** `GH_WORKFLOW_TOKEN` = your scoped GitHub token.
-7. Verify the Cron Trigger `*/5 * * * *` is present. Cloudflare notes a
-   propagation delay of up to 15 minutes.
-8. In GitHub Actions, confirm new runs with event `workflow_dispatch`.
-   Check that the existing `BOT_ENABLED` gate allows intentional monitoring.
-9. Record actual run intervals for one day. If gaps persist, improve the
-   backend architecture rather than claiming five-minute guarantees.
-
-The Worker has no HTTP request handler and contains no Telegram secrets,
-property address or electricity-source credentials. Keep these only in
-existing GitHub repository Secrets. The GitHub token exists **only** inside
-Cloudflare's encrypted secrets.
-
-## Deployment safety
-
-- GitHub's existing concurrency lock prevents simultaneous checks of this repo.
-- The native GitHub cron can remain as a fallback. Duplicate checks are not
-  equivalent to duplicate announcements, but delivery after ambiguous
-  network failures can still repeat.
-- Do **not** reset the encrypted `bot-state` branch. PR #17 has already been
-  merged; the active `main` monitor uses encrypted notification checkpoints.
-- Keep Cloudflare Workers Builds on `main`. The Worker dispatches `check.yml`
-  independently of the monitor's power-provider parser.
-- The free Worker is a lightweight dispatcher. Python, Playwright and
-  state storage remain on GitHub.
-
-Official documentation:
-https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/github-integration/
-https://developers.cloudflare.com/workers/ci-cd/builds/configuration/
-https://developers.cloudflare.com/workers/configuration/cron-triggers/
-https://developers.cloudflare.com/workers/platform/pricing/
-
-The Cloudflare GitHub installation may be authorized for **all repositories**, which is acceptable for a dedicated GitHub account. This does **not** create a Worker or GitHub API credential. Keep the **new fine-grained Actions:write token** scoped to this repository, even when Cloudflare's GitHub installation can access other repositories.
-
-## Independent external watchdog
-
-Production enables WATCHDOG_ENABLED and binds WATCHDOG_KV in wrangler.toml. Keep WATCHDOG_TELEGRAM_BOT_TOKEN and WATCHDOG_TELEGRAM_CHAT_ID in Cloudflare runtime Secrets. The destination must be a private chat with the administrator bot. A fresh healthy installation sends a Ukrainian test message before storing its initial healthy state. Verify receipt in the administrator chat.
-
-### Alert rules
-
-- A completed, successful `check.yml` run on `main` during the preceding
-  20 minutes counts as healthy. Source failures that mark the GitHub job
-  unsuccessful do not count.
-- Two consecutive unhealthy five-minute checks trigger one administrator
-  warning. A transient single GitHub API failure is not reported.
-- Ongoing faults trigger at most one reminder per 60 minutes in normal KV
-  operation. A successful check after an alert triggers one recovery notice.
-- If the GitHub PAT expires, the watchdog retries **public** GitHub run
-  history without using that token. Dispatch still requires a valid PAT.
-- If Telegram delivery fails, the watchdog retries at the next check;
-  failed notifications are not marked as delivered.
-- Cloudflare KV is eventually consistent. Rare duplicate administrator
-  warnings are possible during a concurrent invocation. They do not alter
-  production Telegram notification history.
-- If Cloudflare itself is unavailable, the watchdog cannot report its own
-  failure. This is not a guaranteed safety service.
-
-### Free-tier use
-
-The existing five-minute Cron executes about 288 times per day. With the
-watchdog enabled, KV normally performs at most 288 reads per day and writes
-only when the health status changes or an alert is sent. Current Workers KV
-Free limits include 100,000 reads/day and 1,000 writes/day.
-
-Cloudflare documentation:
-https://developers.cloudflare.com/kv/platform/limits/
-https://developers.cloudflare.com/kv/get-started/
-https://developers.cloudflare.com/workers/configuration/cron-triggers/
+A healthy new installation sends a private setup confirmation. A 20-minute absence of successful GitHub checks and two consecutive failed health assessments trigger an administrator alert. When checks resume, the Worker sends a recovery notice. An unavailable Cloudflare Worker cannot report its own failure.
