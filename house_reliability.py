@@ -145,6 +145,25 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     return list(current), "\n".join(lines)
 
 
+
+def cached_queue_is_fresh(record, now: datetime, max_hours: int = 24) -> bool:
+    """Only previously time-stamped verified queues may be used after a lookup failure.
+
+    An unknown or malformed legacy timestamp is not proof of freshness.
+    Timestamps must be timezone-aware and must not lie in the future.
+    """
+    if not isinstance(record, str) or not record:
+        return False
+    try:
+        verified_at = datetime.fromisoformat(record)
+        if verified_at.tzinfo is None or verified_at.utcoffset() is None:
+            return False
+        age = now - verified_at
+        return timedelta(0) <= age <= timedelta(hours=max_hours)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def trim_state(state: dict, today) -> int:
     """Keep existing deduplication state bounded without deleting live keys."""
     before = len(state)
