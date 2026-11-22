@@ -48,9 +48,12 @@ Keep the native GitHub cron as a fallback. Do not confuse the Cloudflare
 2. On the feature branch, run the manual workflow
    **Migrate notification checkpoint (no Telegram)** with confirmation
    exactly `MIGRATE`. It reads legacy `main/bot_state.json` and writes an
-   HMAC-anonymized checkpoint to `bot-state` once, without sending messages.
+   AES-256-GCM-encrypted checkpoint to `bot-state` once, without sending messages.
 3. Confirm the migration workflow is green. It refuses to overwrite a
-   nonempty target branch or run with BOT_ENABLED=true.
+   nonempty target branch or run with BOT_ENABLED=true. Confirm `bot-state`
+   holds only `format`, `nonce`, and `ciphertext`. Never paste their values
+   into public issues or chats. Keep `state_key` unchanged before and after
+   the migration; it is required to decrypt the checkpoint.
 4. Refresh the feature branch against the now-frozen `main`; the old active
    bot's repeated state commits may otherwise make PR #17 conflict.
 5. Merge PR #17 into main only after the above checks.
@@ -89,7 +92,8 @@ Keep the native GitHub cron as a fallback. Do not confuse the Cloudflare
 - The Telegram API token is deliberately **not** included in the state
   namespace; rotating credentials must not reset existing dedup history.
   The destination chat ID remains part of the namespace.
-- The migration copies `official:status:*` entries to preserve ongoing
+- The migration copies `official:status:*` and `official:incident:*` entries
+  to preserve ongoing
   regional GAV and emergency states alongside the official feed cursor.
 - The migration is still **unexecuted**. Do not mark the rollout complete
   merely because 222 mocked tests pass.
@@ -98,3 +102,18 @@ Keep the native GitHub cron as a fallback. Do not confuse the Cloudflare
 - No authoritative unattended map-polygon verification of the historical
   quarter is implemented; geographic assertions remain based on the private
   operator-provided installation settings.
+
+## 8. Encrypted checkpoint guardrails
+
+- The `bot-state` branch starts as `{}`. Only this exact empty bootstrap
+  format may be unencrypted. Future nonempty writes use authenticated AES-GCM.
+- An unreadable, tampered, or wrong-key checkpoint makes the monitoring job
+  fail **before** Telegram delivery. Never replace it with an empty object.
+- The `POWER_CONFIG_JSON.state_key` is not a rotation-friendly setting.
+  Export and re-encrypt the state offline before changing it.
+- The same secret is accessed by the read and write checkpoint steps. No
+  workflow step must print this secret or expose decrypted state in logs.
+- Previous `main/bot_state.json` commits are still in public Git history.
+  A new encrypted branch protects future data, not historical revisions.
+- The delivery workflow is restricted to `main`; manual dispatch from a
+  feature branch must fail before any Telegram step.
