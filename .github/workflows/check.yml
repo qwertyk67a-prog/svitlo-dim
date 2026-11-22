@@ -61,6 +61,7 @@ jobs:
         env:
           REPOSITORY_STATE_TOKEN: ${{ github.token }}
           REPOSITORY_STATE_BRANCH: bot-state
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           STATE_PATH: bot_state.json
         run: python -m scripts.repo_state load
       - name: Read configured source and notify Telegram
@@ -79,5 +80,6 @@ jobs:
         env:
           REPOSITORY_STATE_TOKEN: ${{ github.token }}
           REPOSITORY_STATE_BRANCH: bot-state
+          POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           STATE_PATH: bot_state.json
         run: python -m scripts.repo_state save
