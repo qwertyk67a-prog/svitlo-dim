@@ -1,6 +1,4 @@
-# Guard against deploying from this template with the old command.
-# node deploy.mjs generates the real configuration from build Secrets.
-main = "src/index.js"
+# Direct Wrangler deployment requires the private generated configuration.
+# This placeholder has no entrypoint, worker name or deployment bindings.
+main = "private-config-required/use-deploy-mjs"
 compatibility_date = "2026-11-21"
-[build]
-command = "node -e \"throw Error('Use node deploy.mjs with the build secret')\""
