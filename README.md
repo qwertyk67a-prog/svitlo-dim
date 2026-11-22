@@ -51,13 +51,13 @@ Wrong forms may cause missed or irrelevant announcements.
 The district and quarter are optional. Only city, street and house are sent
 to the provider address API.
 
-Repository variables: BOT_ENABLED=true enables monitoring.
+Repository Secrets: BOT_ENABLED=true enables monitoring. Existing installations also accept previous repository variables.
 REMINDER_MINUTES=0 disables reminders by default.
 ANNOUNCEMENTS_ENABLED=true enables official regional announcements.
 
 ## Setup
 
-1. Add the full POWER_CONFIG_JSON Repository Secret.
+1. Copy only the current main files into a new repository with a main branch. Add the three required property Secrets. Run Initialize empty notification history once.
 2. Run Verify configured address (no Telegram).
 3. Run Dry-run source audit (no Telegram).
 4. Run Connect Telegram bot (manual) in test mode.
@@ -85,7 +85,7 @@ The `bot-state` GitHub branch stores an **AES-256-GCM encrypted**
 notification checkpoint. The encryption key is derived locally from the
 random `state_key` inside private `POWER_CONFIG_JSON`. No plaintext history,
 private address, or encryption key is stored in new `bot-state` commits.
-The repository starts with an empty `bot-state` branch. The one-time manual
+Initialize empty notification history creates a separate branch with an empty checkpoint in a new repository. The one-time manual
 migration reads legacy `main/bot_state.json` only after the old monitor is
 disabled, and writes authenticated ciphertext without sending Telegram.
 
@@ -111,40 +111,6 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Never copy an example key. The format validator cannot prove that an accepted key is truly random.
 
-## Production release status (22 November 2026)
+## Independent scheduler
 
-PR #17 has been merged into `main` after a controlled pause and successful
-AES-GCM migration of the existing notification history. The live smoke test
-confirmed encrypted state load/save, one verified house queue, and no repeated
-old Telegram announcements. All 254 Python tests passed on the merged code.
-The deployed Cloudflare Worker still dispatches the existing `check.yml`
-every five minutes. The native GitHub schedule remains as fallback.
-
-See [Release verification](docs/release-2026-11-22.md) and
-[Safe deployment checklist](docs/release-checklist.md). The procedure in
-the checklist applies to future migrations, not to the completed rollout.
-
-## Free scheduler and locality scope
-
-The existing native GitHub cron can run late. The optional Cloudflare Worker
-in `deploy/cloudflare-dispatcher` dispatches checks every five minutes on
-Cloudflare Workers Free, without geocoding or hosting the Python monitor.
-The Worker is already deployed on the active `main` branch with
-`ENABLED=true`; continuous `workflow_dispatch` runs have been observed.
-Keep `ENABLED=true` during normal operation. The GitHub Actions write
-token belongs only in the Cloudflare Secret, never in version control.
-
-The separate `Monitor health (read-only)` GitHub workflow checks every 15
-minutes for a successful production monitor run within the previous 20
-minutes. It shows failure in GitHub Actions without reading Telegram tokens,
-addresses, or stored checkpoints. It is **not an independent watchdog**:
-GitHub platform failures can stop the health workflow itself. No admin
-Telegram alert is configured.
-
-The provider's official address directory determines the house's queue.
-District/quarter names from private configuration are used only when an
-official notice explicitly targets those areas. They are not independently
-verified geographic boundaries and do not block queue-based schedules.
-No recurring Google Maps / paid geocoding is used.
-
-See `docs/release-checklist.md` for the exact safe cutover sequence.
+Follow [Cloudflare setup](deploy/cloudflare-dispatcher/README.md) for the dispatcher and its private administrator watchdog. Every installation needs a separate Telegram destination, encryption key and state. A new repository must have Actions enabled. Keep the default branch named main.

@@ -417,23 +417,23 @@ def test_equivalent_house_spelling_and_quarter_metadata_do_not_reset_history():
     from power_config import checkpoint_namespace
     cfg = json.loads(json.dumps(TEST_CONFIG, ensure_ascii=False))
     cfg["address"] = {
-        "city": "м. Кривий Ріг", "street": "вулиця Зразкова",
-        "house": "67А", "district": "Покровський район",
-        "quarter": "129 квартал",
+        "city": "м. Зелений Бір", "street": "вулиця Зразкова",
+        "house": "42А", "district": "Умовний район",
+        "quarter": "987 квартал",
     }
     baseline = checkpoint_namespace(cfg, "telegram-token", "-1001")
     alias = json.loads(json.dumps(cfg, ensure_ascii=False))
     alias["address"]["street"] = "вул. Зразкова"
-    alias["address"]["house"] = "67-A"
+    alias["address"]["house"] = "42-A"
     alias["address"]["quarter"] = "інший опис кварталу"
     alias["address"]["district"] = "новий район"
     assert checkpoint_namespace(alias, "new-token", "-1001") == baseline
-    for equivalent in ("67 А", "67/А", "67.А", "67-а", "67a"):
+    for equivalent in ("42 А", "42/А", "42.А", "42-а", "42a"):
         alias["address"]["house"] = equivalent
         assert checkpoint_namespace(alias, "new-token", "-1001") == baseline
-    alias["address"]["house"] = "6/7А"
+    alias["address"]["house"] = "4/2А"
     assert checkpoint_namespace(alias, "new-token", "-1001") != baseline
-    alias["address"]["house"] = "67/1"
+    alias["address"]["house"] = "42/1"
     assert checkpoint_namespace(alias, "new-token", "-1001") != baseline
 
 

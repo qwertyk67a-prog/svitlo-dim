@@ -17,7 +17,7 @@ jobs:
         id: gate
         shell: bash
         env:
-          CONFIGURED_BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+          CONFIGURED_BOT_ENABLED: ${{ secrets.BOT_ENABLED || vars.BOT_ENABLED }}
         run: |
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
             echo "::error::Production Telegram delivery is allowed only on main"
@@ -74,8 +74,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '0' }}
-          ANNOUNCEMENTS_ENABLED: ${{ vars.ANNOUNCEMENTS_ENABLED || 'true' }}
+          REMINDER_MINUTES: ${{ secrets.REMINDER_MINUTES || vars.REMINDER_MINUTES || '0' }}
+          ANNOUNCEMENTS_ENABLED: ${{ secrets.ANNOUNCEMENTS_ENABLED || vars.ANNOUNCEMENTS_ENABLED || 'true' }}
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           STATE_PATH: bot_state.json
         run: python bot.py --once

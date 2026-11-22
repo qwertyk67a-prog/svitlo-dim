@@ -35,7 +35,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Migrate old state into isolated branch
         env:
-          BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+          BOT_ENABLED: ${{ secrets.BOT_ENABLED || vars.BOT_ENABLED }}
           # The one-time push trigger is created only after the owner
           # explicitly disables BOT_ENABLED. The script independently checks
           # that variable and refuses a nonempty target branch.
