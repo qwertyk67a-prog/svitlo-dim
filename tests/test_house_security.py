@@ -32,7 +32,10 @@ def test_state_token_isolated_from_bot_and_source_branch():
     assert "REPOSITORY_STATE_TOKEN" in save["env"]
     for step in (load,save):
         assert "TELEGRAM_BOT_TOKEN" not in step["env"]
-        assert "POWER_CONFIG_JSON" not in step["env"]
+        # State is AES-GCM encrypted with the installation key held in
+        # POWER_CONFIG_JSON. Never print the secret or send it over the wire.
+        assert "POWER_CONFIG_JSON" in step["env"]
+        assert "secrets.POWER_CONFIG_JSON" in step["env"]["POWER_CONFIG_JSON"]
         assert step["env"]["REPOSITORY_STATE_BRANCH"] == "bot-state"
         assert "python -m scripts.repo_state" in step["run"]
     assert "steps.load_state.outcome == 'success'" in save["if"]
@@ -94,6 +97,7 @@ def test_dependencies_pinned_against_compatible_constraints():
     assert "beautifulsoup4==" in requirements
     assert "curl-cffi==" in requirements
     assert "playwright-stealth==" in requirements
+    assert "cryptography==" in requirements
     assert "playwright==" in (ROOT / "constraints.txt").read_text()
 
 
