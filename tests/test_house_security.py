@@ -184,7 +184,7 @@ def test_non_main_workflow_ref_cannot_send_telegram(tmp_path):
         "CONFIGURED_BOT_ENABLED": "true",
         "GITHUB_OUTPUT": str(path),
         "GITHUB_EVENT_NAME": "workflow_dispatch",
-        "GITHUB_REF": "refs/heads/feature/provider-independent-template-20261120",
+        "GITHUB_REF": "refs/heads/feature/test-branch",
     })
     result=subprocess.run(
         ["bash","-e"],input=script,text=True,capture_output=True,

@@ -1,7 +1,6 @@
 name: Test Cloudflare dispatcher and independent watchdog
 on:
   push:
-    branches: [main, feature/cloudflare-independent-watchdog-20261122, enable/private-watchdog]
     paths:
       - deploy/cloudflare-dispatcher/**
       - .github/workflows/test-cloudflare-dispatcher.yml
@@ -22,17 +21,7 @@ jobs:
           cd deploy/cloudflare-dispatcher
           node --test tests/*.test.mjs
       - name: Dry-run Cloudflare Worker bundle without deployment or Secrets
-        run: |
-          cd deploy/cloudflare-dispatcher
-          npx --yes wrangler deploy --dry-run --outdir ../../.wrangler-dry-run
-      - name: 'Verify production watchdog configuration'
-        run: |
-          python - <<'PY'
-          import re
-          import tomllib
-          with open("deploy/cloudflare-dispatcher/wrangler.toml", "rb") as f:
-              config = tomllib.load(f)
-          assert config["vars"]["ENABLED"] == "true"
-          assert config["vars"]["WATCHDOG_ENABLED"] == "true"
-          assert any(b["binding"] == "WATCHDOG_KV" and re.fullmatch("[0-9a-f]{32}", b["id"]) for b in config["kv_namespaces"])
-          PY
+        env:
+          WORKER_INSTALLATION_JSON: >-
+            {"worker":"synthetic-worker","namespace":"00000000000000000000000000000001","repository":"${{ github.repository }}"}
+        run: node deploy/cloudflare-dispatcher/deploy.mjs --dry-run

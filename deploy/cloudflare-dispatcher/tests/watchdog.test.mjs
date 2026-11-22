@@ -39,7 +39,7 @@ function storage() {
 
 function env(kv) {
   return {
-    GH_REPOSITORY: "test-org/test-repo",
+    TARGET_REPOSITORY: "test-org/test-repo",
     GH_WORKFLOW_TOKEN: "test-gh-token",
     WATCHDOG_ENABLED: "true",
     WATCHDOG_KV: kv,
@@ -158,7 +158,7 @@ test("disabled Worker preserves existing one-request GitHub dispatch", async () 
   };
   try {
     await worker.scheduled({}, {
-      ENABLED: "true", GH_REPOSITORY: "test-org/test-repo",
+      ENABLED: "true", TARGET_REPOSITORY: "test-org/test-repo",
       GH_WORKFLOW_TOKEN: "test-gh-token", GH_REF: "main",
       WATCHDOG_ENABLED: "false",
     }, {});

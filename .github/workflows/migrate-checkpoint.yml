@@ -1,9 +1,5 @@
 name: Migrate notification checkpoint (no Telegram)
 on:
-  push:
-    branches: [feature/provider-independent-template-20261120]
-    paths:
-      - release/migrate-trigger.txt
   workflow_dispatch:
     inputs:
       confirmation:

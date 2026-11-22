@@ -2,7 +2,7 @@ name: Dry-run source audit (no Telegram)
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/provider-independent-template-20261120]
+    branches: [main]
     paths:
       - .github/workflows/audit-dry-run.yml
       - alerts.py

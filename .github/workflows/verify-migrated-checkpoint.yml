@@ -1,11 +1,6 @@
 name: Verify encrypted migrated checkpoint (read-only)
 on:
   workflow_dispatch:
-  push:
-    branches: [feature/provider-independent-template-20261120]
-    paths:
-      - .github/workflows/verify-migrated-checkpoint.yml
-      - scripts/verify_migrated_checkpoint.py
 permissions:
   contents: read
 jobs:

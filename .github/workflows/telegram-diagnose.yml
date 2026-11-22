@@ -1,9 +1,5 @@
 name: Diagnose Telegram connection (no messages)
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/telegram-diagnose.yml
   workflow_dispatch:
 permissions:
   contents: read

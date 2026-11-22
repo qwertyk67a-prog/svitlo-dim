@@ -88,7 +88,7 @@ function record(status, sinceMs, lastAlertMs = 0) {
 
 export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now()) {
   if (env.WATCHDOG_ENABLED !== "true") return "disabled";
-  const repository = verifyRepository(env.GH_REPOSITORY);
+  const repository = verifyRepository(env.TARGET_REPOSITORY);
   if (!env.WATCHDOG_KV || !env.GH_WORKFLOW_TOKEN ||
       !env.WATCHDOG_TELEGRAM_BOT_TOKEN || !env.WATCHDOG_TELEGRAM_CHAT_ID) {
     throw new Error("Watchdog is enabled without required KV or Secrets");
