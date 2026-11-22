@@ -667,6 +667,8 @@ async def once():
                 fetch_official_page(), state, now, scope=regional_scope
             )
             for post_id, key, value, message in events:
+                if key.startswith("official:unresolved:"):
+                    source_problems.append("ambiguous_official_incident")
                 enqueue(0, key, value, message, "official", cursor=post_id)
             if not events and "official:last_id" in state:
                 persist()
