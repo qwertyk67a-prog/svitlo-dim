@@ -162,6 +162,7 @@ def test_runner_gate_accepts_surrounding_spaces_but_rejects_other_values(tmp_pat
             "CONFIGURED_BOT_ENABLED": value,
             "GITHUB_OUTPUT": str(output),
             "GITHUB_EVENT_NAME": "workflow_dispatch" if manual else "schedule",
+            "GITHUB_REF": "refs/heads/main",
         })
         result=subprocess.run(
             ["bash","-e"],input=script,text=True,capture_output=True,env=env,
@@ -172,6 +173,26 @@ def test_runner_gate_accepts_surrounding_spaces_but_rejects_other_values(tmp_pat
         )
         if expected_active is not None:
             assert f"active={expected_active}" in output.read_text(encoding="utf-8")
+
+
+def test_non_main_workflow_ref_cannot_send_telegram(tmp_path):
+    wf=yaml.safe_load((ROOT/".github/workflows/check.yml").read_text())
+    script=wf["jobs"]["check"]["steps"][0]["run"]
+    path=tmp_path/"activation.txt"
+    env=os.environ.copy()
+    env.update({
+        "CONFIGURED_BOT_ENABLED": "true",
+        "GITHUB_OUTPUT": str(path),
+        "GITHUB_EVENT_NAME": "workflow_dispatch",
+        "GITHUB_REF": "refs/heads/feature/provider-independent-template-20261120",
+    })
+    result=subprocess.run(
+        ["bash","-e"],input=script,text=True,capture_output=True,
+        env=env,check=False,
+    )
+    assert result.returncode != 0
+    assert "only on main" in result.stdout or "only on main" in result.stderr
+    assert not path.exists() or "active=true" not in path.read_text()
 
 
 def test_no_production_hardcoded_queue_or_private_district():
