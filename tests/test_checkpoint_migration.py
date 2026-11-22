@@ -55,6 +55,10 @@ def test_migration_refuses_to_run_while_monitor_active(monkeypatch):
     from scripts import migrate_checkpoint
     monkeypatch.setenv("BOT_ENABLED", "true")
     monkeypatch.setenv("CONFIRM_MIGRATION", "MIGRATE")
+    monkeypatch.setattr(migrate_checkpoint, "settings", lambda:
+                        ("example/repo", "bot-state", "fake-token", Path("state.json")))
+    monkeypatch.setattr(migrate_checkpoint, "live_monitor_is_frozen",
+                        lambda *_args: False)
     with pytest.raises(RuntimeError, match="Disable"):
         migrate_checkpoint.run()
 
@@ -63,6 +67,10 @@ def test_migration_refuses_missing_or_ambiguous_enabled_flag(monkeypatch):
     import pytest
     from scripts import migrate_checkpoint
     monkeypatch.setenv("CONFIRM_MIGRATION", "MIGRATE")
+    monkeypatch.setattr(migrate_checkpoint, "settings", lambda:
+                        ("example/repo", "bot-state", "fake-token", Path("state.json")))
+    monkeypatch.setattr(migrate_checkpoint, "live_monitor_is_frozen",
+                        lambda *_args: False)
     for disabled in ("", "true", "False true", "0"):
         monkeypatch.setenv("BOT_ENABLED", disabled)
         with pytest.raises(RuntimeError, match="Disable"):
@@ -87,3 +95,43 @@ def test_external_dispatcher_requires_explicit_activation():
     assert "GH_WORKFLOW_TOKEN" in worker
     assert "ghp_" not in worker
     assert 'ENABLED = "true"' in wrangler
+
+
+def test_main_release_freeze_requires_actual_production_workflow_marker(monkeypatch):
+    import base64
+    from scripts import migrate_checkpoint
+
+    paused = '''
+name: Check power schedule
+          SVITLO_RELEASE_PAUSE: "true"
+          if [[ "$SVITLO_RELEASE_PAUSE" == "true" ]]; then
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            echo "SVITLO_RELEASE_PAUSE_V1: no Telegram notifications during migration"
+            exit 0
+          fi
+          if [[ "$CONFIGURED_BOT_ENABLED" =~ ^[[:space:]]*true[[:space:]]*$ ]]; then
+'''
+    class Response:
+        def __init__(self, content):
+            self.content = content
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def read(self, *_args):
+            return json.dumps({
+                "content": base64.b64encode(self.content.encode()).decode()
+            }).encode()
+
+    monkeypatch.setattr(migrate_checkpoint, "urlopen",
+                        lambda *_args, **_kwargs: Response(paused))
+    assert migrate_checkpoint.live_monitor_is_frozen("example/repo", "token")
+
+    monkeypatch.setattr(migrate_checkpoint, "urlopen",
+                        lambda *_args, **_kwargs: Response(
+                            paused.replace('SVITLO_RELEASE_PAUSE: "true"',
+                                           'SVITLO_RELEASE_PAUSE: "false"')
+                        ))
+    import pytest
+    with pytest.raises(RuntimeError, match="not explicitly paused"):
+        migrate_checkpoint.live_monitor_is_frozen("example/repo", "token")
