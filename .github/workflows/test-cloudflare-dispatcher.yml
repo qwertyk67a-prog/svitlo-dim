@@ -21,7 +21,7 @@ jobs:
           node --version
           cd deploy/cloudflare-dispatcher
           node --test tests/*.test.mjs
-      - name: Verify safe default: dispatch enabled and watchdog disabled
+      - name: 'Verify safe default: dispatch enabled and watchdog disabled'
         run: |
           grep -q '^ENABLED = "true"$' deploy/cloudflare-dispatcher/wrangler.toml
           grep -q '^WATCHDOG_ENABLED = "false"$' deploy/cloudflare-dispatcher/wrangler.toml
