@@ -165,7 +165,8 @@ def checkpoint_namespace(config, bot_token="", chat_id=""):
         "ajax_url": config["ajax_url"],
         "telegram_feed": config["telegram_feed"],
         "address": config["address"],
-        "bot_token": bot_token,
+        # Tokens change when credentials are rotated. They are not a stable
+        # bot identity and must never erase notification deduplication state.
         "chat_id": chat_id,
     }
     canonical = json.dumps(
