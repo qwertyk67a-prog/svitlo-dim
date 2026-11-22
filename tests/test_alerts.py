@@ -727,3 +727,32 @@ def test_ambiguous_letter_suffix_alias_is_rejected():
         pass
     else:
         raise AssertionError("Two approximate variants cannot be resolved")
+
+
+def test_gop_capacity_limits_do_not_trigger_false_household_outage():
+    general = fake_post(
+        600, "Прикладщина: введено ГОП для промислових споживачів"
+    )
+    event = regional_event(general)
+    assert event is not None
+    assert event["kind"] == "gop"
+    assert event["status"] == "active"
+    # Province-level industrial power limits are not evidence of outages
+    # for a residential building inside that province.
+    notices = scoped_candidates(
+        html_page([general]), {"official:last_id":599}, NOW
+    )
+    assert not [item for item in notices if item[3]]
+
+
+def test_gop_only_reports_a_specific_officially_named_house():
+    post = fake_post(
+        601, "Зелений Бір: введено ГОП за адресою вул. Умовна 12Г"
+    )
+    notices = [item for item in scoped_candidates(
+        html_page([post]), {"official:last_id":600}, NOW
+    ) if item[3]]
+    assert len(notices) == 1
+    assert notices[0][2]["status"] == "active"
+    assert "Обмеження електричної потужності" in notices[0][3]
+    assert "не графік відключення світла" in notices[0][3]
