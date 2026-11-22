@@ -24,6 +24,6 @@ jobs:
           persist-credentials: false
       - name: Verify successful production monitor within 20 minutes
         env:
-          BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+          BOT_ENABLED: ${{ secrets.BOT_ENABLED || vars.BOT_ENABLED }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m scripts.monitor_health

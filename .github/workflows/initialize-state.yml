@@ -1,0 +1,36 @@
+name: Initialize empty notification history
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: power-outage-monitor
+  cancel-in-progress: false
+jobs:
+  initialize:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Create a new isolated history in this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          git init --quiet
+          git config user.name "Notification monitor"
+          git config user.email "monitor@users.noreply.github.com"
+          git config credential.helper '!gh auth git-credential'
+          remote="https://github.com/${GITHUB_REPOSITORY}.git"
+          ref=refs/heads/bot-state
+          existing=$(git ls-remote --refs "$remote" "$ref")
+          if [[ -n "$existing" ]]; then
+            echo "History already exists. No changes."
+            exit 0
+          fi
+          printf '{}\n' > bot_state.json
+          git add bot_state.json
+          git commit --quiet -m 'Initialize empty notification checkpoint'
+          git push --force-with-lease="$ref:" "$remote" "HEAD:$ref"

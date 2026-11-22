@@ -58,7 +58,7 @@ def test_official_html_posts_are_parsed_by_id_and_time():
     assert result[1]["url"]=="https://t.me/sample_energy/16"
 
 
-def test_kyiv_dnipro_city_and_general_news_not_transmitted_to_kryvyi_rih():
+def test_other_cities_and_general_news_are_filtered():
     samples=[
         "‼️ Київ, Київська область та місто Другоград: тривають екстрені відключення",
         "‼️ Другоград: екстрені відключення",
