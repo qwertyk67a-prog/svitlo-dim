@@ -59,6 +59,16 @@ def test_migration_refuses_to_run_while_monitor_active(monkeypatch):
         migrate_checkpoint.run()
 
 
+def test_migration_refuses_missing_or_ambiguous_enabled_flag(monkeypatch):
+    import pytest
+    from scripts import migrate_checkpoint
+    monkeypatch.setenv("CONFIRM_MIGRATION", "MIGRATE")
+    for disabled in ("", "true", "False true", "0"):
+        monkeypatch.setenv("BOT_ENABLED", disabled)
+        with pytest.raises(RuntimeError, match="Disable"):
+            migrate_checkpoint.run()
+
+
 def test_migration_requires_explicit_confirmation(monkeypatch):
     import pytest
     from scripts import migrate_checkpoint
