@@ -1,5 +1,9 @@
 name: Migrate notification checkpoint (no Telegram)
 on:
+  push:
+    branches: [feature/provider-independent-template-20261120]
+    paths:
+      - release/migrate-trigger.txt
   workflow_dispatch:
     inputs:
       confirmation:
@@ -32,7 +36,10 @@ jobs:
       - name: Migrate old state into isolated branch
         env:
           BOT_ENABLED: ${{ vars.BOT_ENABLED }}
-          CONFIRM_MIGRATION: ${{ inputs.confirmation }}
+          # The one-time push trigger is created only after the owner
+          # explicitly disables BOT_ENABLED. The script independently checks
+          # that variable and refuses a nonempty target branch.
+          CONFIRM_MIGRATION: ${{ github.event_name == 'push' && 'MIGRATE' || inputs.confirmation }}
           REPOSITORY_STATE_TOKEN: ${{ github.token }}
           REPOSITORY_STATE_BRANCH: bot-state
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
