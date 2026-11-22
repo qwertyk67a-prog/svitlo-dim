@@ -556,7 +556,7 @@ async def once():
     """One-house notification run: urgent changes first, reminders only while timely."""
     from house_reliability import (
         due_reminders, house_queue_transition, parse_reminder_minutes,
-        trim_state, verified_house_queues,
+        trim_state, verified_house_queues, cached_queue_is_fresh,
     )
 
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
@@ -605,6 +605,12 @@ async def once():
             house_groups = verified_house_queues(
                 house.group_ids if house is not None else None
             )
+            # One checkpoint per hour is sufficient to establish a bounded
+            # fallback age without committing new state every five minutes.
+            verified_hour = now.replace(minute=0, second=0, microsecond=0).isoformat()
+            if state.get("house:last_verified_at") != verified_hour:
+                state["house:last_verified_at"] = verified_hour
+                persist()
             house_snapshot, queue_change = house_queue_transition(
                 state, house_groups
             )
@@ -616,18 +622,21 @@ async def once():
         except Exception as exc:
             LOG.warning("Не вдалося перевірити черги за адресою: %s",
                         type(exc).__name__)
-            # A failed address request must NOT stop the official news feed.
-            # Only previously verified, persisted queues may supply GPV facts.
+            # Fail the run even if we can process schedules with a recent
+            # verified queue. Otherwise an address-source outage looks healthy.
+            source_problems.append("address_lookup")
+            # An old or un-timestamped assignment is not safe indefinitely.
             cached = state.get("house:groups")
-            if cached:
+            if cached and cached_queue_is_fresh(
+                    state.get("house:last_verified_at"), now):
                 try:
                     house_groups = verified_house_queues(cached)
                     house_snapshot = list(house_groups)
-                    LOG.warning("Використовую останні підтверджені черги будинку")
+                    LOG.warning("Тимчасово використовую перевірені черги з кешу")
                 except ValueError:
                     house_groups = None
-            if house_groups is None:
-                source_problems.append("address_lookup")
+            else:
+                LOG.warning("Підтвердження черги застаріле або відсутнє")
     elif state.get("house:queue_hold"):
         LOG.warning("Раніше чергу не підтверджено; потрібен секрет адреси")
         return
@@ -676,6 +685,7 @@ async def once():
                 enqueue(1, key, value, message, "address")
         except Exception as exc:
             LOG.warning("Адресні події недоступні: %s", type(exc).__name__)
+            source_problems.append("address_events")
 
     try:
         if house_groups is not None:
