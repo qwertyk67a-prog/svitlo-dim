@@ -28,6 +28,7 @@ def migrate_snapshot(raw, namespace):
             # only the feed cursor would otherwise discard an ongoing outage.
             or key.startswith("official:status:")
             or key.startswith("official:incident:")
+            or key.startswith("official:unresolved:")
             or key.startswith("official:event:")
             or bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}:.+", key))
             or bool(re.fullmatch(r"(?:week|reminder):\d{4}-\d{2}-\d{2}:.+", key))
