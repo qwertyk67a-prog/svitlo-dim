@@ -27,13 +27,12 @@ jobs:
           npx --yes wrangler deploy --dry-run --outdir ../../.wrangler-dry-run
       - name: 'Verify production watchdog configuration'
         run: |
-          grep -q '^ENABLED = "true"$' deploy/cloudflare-dispatcher/wrangler.toml
-          grep -q '^WATCHDOG_ENABLED = "true" deploy/cloudflare-dispatcher/wrangler.toml
- deploy/cloudflare-dispatcher/wrangler.toml
           python - <<'PY'
+          import re
           import tomllib
           with open("deploy/cloudflare-dispatcher/wrangler.toml", "rb") as f:
               config = tomllib.load(f)
-          import re
+          assert config["vars"]["ENABLED"] == "true"
+          assert config["vars"]["WATCHDOG_ENABLED"] == "true"
           assert any(b["binding"] == "WATCHDOG_KV" and re.fullmatch("[0-9a-f]{32}", b["id"]) for b in config["kv_namespaces"])
           PY
