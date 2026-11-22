@@ -756,3 +756,78 @@ def test_gop_only_reports_a_specific_officially_named_house():
     assert notices[0][2]["status"] == "active"
     assert "Обмеження електричної потужності" in notices[0][3]
     assert "не графік відключення світла" in notices[0][3]
+
+
+def test_independent_dated_emergencies_are_not_conflated():
+    """Each official start is a separate active event with its own closure."""
+    state = {"official:last_id": 700}
+    first = html_page([
+        fake_post(701, "Прикладщина: запроваджено екстрені відключення. "
+                        "Початок: 08.11.2026 14:00"),
+        fake_post(702, "Прикладщина: введено нові екстрені відключення. "
+                        "Початок: 08.11.2026 15:00"),
+    ])
+    opened = scoped_candidates(first, state, NOW)
+    delivered = [row for row in opened if row[3]]
+    assert len(delivered) == 2
+    keys = {row[1] for row in delivered}
+    assert len(keys) == 2
+    assert all(key.startswith("official:incident:emergency:region:")
+               for key in keys)
+    for _, key, record, _ in opened:
+        state[key] = record
+
+    cancelled = html_page([
+        fake_post(703, "Прикладщина: екстрені відключення скасовано. "
+                        "Початок: 08.11.2026 14:00"),
+    ])
+    rows = scoped_candidates(cancelled, state, NOW)
+    notices = [row for row in rows if row[3]]
+    assert len(notices) == 1
+    assert notices[0][1] in keys
+    assert notices[0][2]["status"] == "ended"
+    for _, key, record, _ in rows:
+        state[key] = record
+    remaining = [key for key in keys if state[key]["status"] == "active"]
+    assert len(remaining) == 1
+
+    # An undated closure is now unambiguous: exactly one incident remains.
+    final = html_page([
+        fake_post(704, "Прикладщина: екстрені відключення скасовано"),
+    ])
+    final_notices = [row for row in scoped_candidates(final, state, NOW) if row[3]]
+    assert len(final_notices) == 1
+    assert final_notices[0][1] == remaining[0]
+
+
+def test_ambiguous_undated_closure_fails_instead_of_false_restoration():
+    import pytest
+    state = {"official:last_id": 710}
+    opened = scoped_candidates(html_page([
+        fake_post(711, "Прикладщина: запроваджено екстрені відключення. "
+                        "Початок: 08.11.2026 13:00"),
+        fake_post(712, "Прикладщина: запроваджено екстрені відключення. "
+                        "Початок: 08.11.2026 14:00"),
+    ]), state, NOW)
+    for _, key, record, _ in opened:
+        state[key] = record
+
+    with pytest.raises(RuntimeError, match="кілька активних аварій"):
+        scoped_candidates(html_page([
+            fake_post(713, "Прикладщина: екстрені відключення скасовано"),
+        ]), state, NOW)
+    assert sum(
+        isinstance(v, dict) and v.get("status") == "active"
+        for k, v in state.items() if k.startswith("official:incident:")
+    ) == 2
+
+
+def test_dated_active_then_ended_in_same_batch_is_not_late_news():
+    state = {"official:last_id": 720}
+    notices = scoped_candidates(html_page([
+        fake_post(721, "Прикладщина: запроваджено екстрені відключення. "
+                        "Початок: 08.11.2026 14:00"),
+        fake_post(722, "Прикладщина: екстрені відключення скасовано. "
+                        "Початок: 08.11.2026 14:00"),
+    ]), state, NOW)
+    assert not [row for row in notices if row[3]]
