@@ -18,7 +18,13 @@ jobs:
         shell: bash
         env:
           CONFIGURED_BOT_ENABLED: ${{ vars.BOT_ENABLED }}
+          SVITLO_RELEASE_PAUSE: "true"
         run: |
+          if [[ "$SVITLO_RELEASE_PAUSE" == "true" ]]; then
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            echo "SVITLO_RELEASE_PAUSE_V1: no Telegram notifications during migration"
+            exit 0
+          fi
           if [[ "$CONFIGURED_BOT_ENABLED" =~ ^[[:space:]]*true[[:space:]]*$ ]]; then
             echo "active=true" >> "$GITHUB_OUTPUT"
             echo "BOT_ENABLED is exactly true; continuing with DTEK"
