@@ -380,7 +380,7 @@ def region_candidates(page, state, now, scope=None):
                         "published": post["date"].isoformat(),
                         "content_hash": digest,
                     },
-                    "\\n".join((
+                    "\n".join((
                         "⚠️ <b>Неоднозначне уточнення аварійного режиму</b>",
                         "Офіційне повідомлення не вказує, якої саме "
                         "з кількох активних подій стосується зміна.",
