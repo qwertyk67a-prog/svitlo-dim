@@ -3,8 +3,9 @@
  * Contains no address, provider URL, Telegram token or chat ID.
  * This Worker exposes no HTTP request handler.
  */
-export default {
-  async scheduled(_event, env, _ctx) {
+import { checkExternalHealth } from "./watchdog.js";
+
+async function dispatchGitHub(env) {
     if (env.ENABLED !== "true") {
       console.log("Dispatch disabled");
       return;
@@ -39,5 +40,33 @@ export default {
       throw new Error("GitHub dispatch failed: HTTP " + response.status);
     }
     console.log("Workflow dispatch accepted");
+}
+
+export default {
+  async scheduled(_event, env, _ctx) {
+    if (env.ENABLED !== "true") {
+      console.log("Dispatch disabled");
+      return;
+    }
+    let dispatchError = null;
+    try {
+      await dispatchGitHub(env);
+    } catch (error) {
+      dispatchError = error;
+    }
+
+    let healthError = null;
+    if (env.WATCHDOG_ENABLED === "true") {
+      try {
+        const result = await checkExternalHealth(env);
+        console.log("External health status:", result);
+      } catch (error) {
+        // A watchdog error must not prevent dispatch on the next Cron tick.
+        // Never log API response bodies, Telegram URLs or secret values.
+        healthError = error;
+      }
+    }
+    if (dispatchError) throw dispatchError;
+    if (healthError) throw healthError;
   },
 };
