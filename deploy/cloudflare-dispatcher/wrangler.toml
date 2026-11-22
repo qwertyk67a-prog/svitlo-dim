@@ -12,5 +12,9 @@ crons = ["*/5 * * * *"]
 GH_REPOSITORY = "qwertyk67a-prog/svitlo-dim"
 GH_REF = "main"
 ENABLED = "true"
-# Explicitly disabled until separate admin Telegram Secrets and KV exist.
-WATCHDOG_ENABLED = "false"
+WATCHDOG_ENABLED = "true"
+WATCHDOG_CONFIRM_SETUP = "true"
+
+[[kv_namespaces]]
+binding = "WATCHDOG_KV"
+id = "afd7e0a67f00423ba96937b6c6c36d1a"

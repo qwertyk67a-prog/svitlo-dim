@@ -62,6 +62,7 @@ async function sendTelegram(env, text, fetchFn) {
   if (!token || !chat) {
     throw new Error("Watchdog Telegram Secrets missing");
   }
+  if (!/^[1-9]\d*$/.test(chat)) throw new Error("Private administrator chat ID required");
   // Never log the secret, URL, response body or Telegram chat ID.
   const url = "https://api.telegram.org/bot" + token + "/sendMessage";
   const response = await fetchFn(url, {
@@ -110,6 +111,9 @@ export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now
         key, JSON.stringify(record("healthy", nowMs))
       );
       return "recovered";
+    }
+    if (!old && env.WATCHDOG_CONFIRM_SETUP === "true") {
+      await sendTelegram(env, "✅ SVITLO-DIM: тестове особисте повідомлення. Контроль запусків GitHub увімкнено.", fetchFn);
     }
     if (old?.status === "suspect" || !old) {
       await env.WATCHDOG_KV.put(

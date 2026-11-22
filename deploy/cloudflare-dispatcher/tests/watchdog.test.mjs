@@ -44,7 +44,7 @@ function env(kv) {
     WATCHDOG_ENABLED: "true",
     WATCHDOG_KV: kv,
     WATCHDOG_TELEGRAM_BOT_TOKEN: "test-telegram-token",
-    WATCHDOG_TELEGRAM_CHAT_ID: "-100test",
+    WATCHDOG_TELEGRAM_CHAT_ID: "123456",
   };
 }
 
@@ -184,4 +184,22 @@ test("Worker still inspects health if dispatch POST fails", async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("activation confirms private delivery once on a healthy installation", async () => {
+  const kv = storage();
+  const cfg = { ...env(kv), WATCHDOG_CONFIRM_SETUP: "true" };
+  const messages = [];
+  const mockFetch = async (url, options) => {
+    if (url.includes("api.github.com")) return response(200, {workflow_runs: [record(1)]});
+    messages.push(JSON.parse(options.body));
+    return response(200, {ok: true});
+  };
+  await assert.rejects(checkExternalHealth({...cfg, WATCHDOG_TELEGRAM_CHAT_ID: "-123"}, mockFetch, T), /Private administrator/);
+  assert.equal(kv.writes, 0);
+  await checkExternalHealth(cfg, mockFetch, T);
+  await checkExternalHealth(cfg, mockFetch, T + 300000);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].chat_id, cfg.WATCHDOG_TELEGRAM_CHAT_ID);
+  assert.match(messages[0].text, /тестове особисте/);
 });
