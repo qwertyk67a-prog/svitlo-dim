@@ -1,8 +1,7 @@
 # Cloudflare Free: five-minute GitHub workflow dispatcher
 
 This dispatcher is **already deployed and active** for the production bot.
-Keep `ENABLED=true`. The optional external watchdog is disabled until its
-private Telegram destination and KV binding are configured. The original
+Keep `ENABLED=true`. The external watchdog uses its own private Telegram destination and bound KV namespace. The original
 GitHub fine-grained token stays a Cloudflare Runtime Secret.
 
 ## Why
@@ -66,42 +65,9 @@ https://developers.cloudflare.com/workers/platform/pricing/
 
 The Cloudflare GitHub installation may be authorized for **all repositories**, which is acceptable for a dedicated GitHub account. This does **not** create a Worker or GitHub API credential. Keep the **new fine-grained Actions:write token** scoped to this repository, even when Cloudflare's GitHub installation can access other repositories.
 
-## Independent external watchdog — prepared, not enabled
+## Independent external watchdog
 
-GitHub-based health checks cannot warn when GitHub itself is unavailable.
-The dispatcher can separately inspect GitHub's recent completed workflow
-runs every five minutes and notify a **private administrator Telegram chat**.
-This watchdog runs on Cloudflare, not GitHub. It does not report physical
-power availability and does not transmit the monitored street address.
-
-**Safe default:** `WATCHDOG_ENABLED = "false"` in `wrangler.toml`.
-The existing Cron dispatch remains active while the watchdog is disabled.
-
-To activate later, prepare all three Cloudflare resources first:
-
-1. Create a free Workers KV namespace, for example `svitlo-watchdog-state`.
-   Copy its namespace ID. Add its binding **to the deployment's
-   `wrangler.toml`** only after creation:
-
-   ```toml
-   [[kv_namespaces]]
-   binding = "WATCHDOG_KV"
-   id = "REPLACE_WITH_THE_ACTUAL_NAMESPACE_ID"
-   ```
-
-   **Never commit the placeholder ID.** A real namespace ID is required
-   before deployment. A dashboard-only binding may not survive subsequent
-   Wrangler deployments; keep Wrangler and dashboard settings consistent.
-2. Create a **dedicated administrator Telegram bot**, or select a trusted
-   existing bot. Add its token to the *Cloudflare runtime Secrets* as
-   `WATCHDOG_TELEGRAM_BOT_TOKEN`. Never use a plain-text Variable.
-3. Start a private chat with that bot. Put the numeric chat ID into a
-   *Cloudflare runtime Secret* called `WATCHDOG_TELEGRAM_CHAT_ID`.
-   Do not send tokens in screenshots, issues or ChatGPT messages.
-4. Verify Cloudflare has the `WATCHDOG_KV` binding and both Secrets.
-   Only then change `WATCHDOG_ENABLED` to `"true"` in Wrangler and
-   deploy. Monitor the first external health assessment and a simulated
-   failure before relying on it.
+Production enables WATCHDOG_ENABLED and binds WATCHDOG_KV in wrangler.toml. Keep WATCHDOG_TELEGRAM_BOT_TOKEN and WATCHDOG_TELEGRAM_CHAT_ID in Cloudflare runtime Secrets. The destination must be a private chat with the administrator bot. A fresh healthy installation sends a Ukrainian test message before storing its initial healthy state. Verify receipt in the administrator chat.
 
 ### Alert rules
 
