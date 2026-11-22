@@ -1,0 +1,26 @@
+name: One-time production smoke dispatch
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-smoke-dispatch.yml
+permissions:
+  actions: write
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger normal production check without exposing Telegram credentials
+        env:
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --silent --show-error --fail \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data '{"ref":"main"}' \
+            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/check.yml/dispatches"
