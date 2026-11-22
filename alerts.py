@@ -86,6 +86,8 @@ def regional_event(post):
     ))
     if restore_gpv:
         kind = "emergency"
+    elif re.search(r"\bгоп\b|графік\w*\s+обмежен\w*\s+(?:споживанн\w*\s+)?(?:електричн\w*\s+)?потужност\w*", context):
+        kind = "gop"
     elif re.search(r"\b(?:гав|графік\w*\s+аварійн\w*\s+відключен\w*)\b", context):
         kind = "gav"
     elif "екстрен" in context and "відключен" in context:
@@ -145,6 +147,11 @@ def regional_message(event, changed=False):
                  "✅ <b>Графіки аварійних відключень скасовано</b>")
         body = ("Погодинний графік може бути неактуальним." if active else
                 "Оновлення стосується аварійного режиму, а не гарантії наявності світла.")
+    elif kind == "gop":
+        title = ("⚠️ <b>Обмеження електричної потужності</b>" if active else
+                 "✅ <b>Обмеження електричної потужності скасовано</b>")
+        body = ("ГОП — обмеження потужності, не графік відключення світла." if active
+                else "Припинення ГОП не підтверджує фактичну наявність світла.")
     else:
         title = (f"⚠️ <b>{op} повідомив про знеструмлення</b>" if active else
                  f"✅ <b>{op} повідомив про відновлення електропостачання на території</b>")
@@ -303,6 +310,11 @@ def region_candidates(page, state, now, scope=None):
         event = regional_event(post)
         coverage = coverage_for_house(post["text"], scope) if event else None
         if not event or not coverage:
+            continue
+        # GOП generally applies to industrial/high-power consumers, not
+        # apartment households. Send only when the official notice names
+        # this exact house; a region-wide headline is insufficient.
+        if event["kind"] == "gop" and coverage.get("level") != "house":
             continue
         event["coverage"] = coverage
         event["content_hash"] = digest
