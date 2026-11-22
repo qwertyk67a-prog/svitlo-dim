@@ -8,6 +8,9 @@ on:
       - scripts/verify_address.py
       - scripts/repo_state.py
       - scripts/migrate_checkpoint.py
+      - scripts/state_crypto.py
+      - scripts/monitor_health.py
+      - .github/workflows/monitor-health.yml
       - .github/workflows/migrate-checkpoint.yml
       - deploy/cloudflare-dispatcher/**
       - scripts/verify_source_tables.py
