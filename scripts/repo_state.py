@@ -13,6 +13,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from scripts.state_crypto import open_checkpoint, seal_checkpoint
+
 
 MAX_BYTES = 512 * 1024
 
@@ -63,7 +65,7 @@ def call_api(repository, branch, token, payload=None):
         raise RuntimeError("GitHub checkpoint API HTTP " + str(exc.code)) from None
 
 
-def decode_checkpoint(payload):
+def decode_checkpoint(payload, *, allow_legacy=False):
     if not isinstance(payload, dict) or not isinstance(payload.get("sha"), str):
         raise RuntimeError("GitHub checkpoint missing revision")
     raw = payload.get("content")
@@ -73,7 +75,8 @@ def decode_checkpoint(payload):
         data = base64.b64decode(raw, validate=False)
         if len(data) > MAX_BYTES:
             raise ValueError("too large")
-        state = json.loads(data.decode("utf-8"))
+        clear = open_checkpoint(data, allow_legacy=allow_legacy)
+        state = json.loads(clear.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         raise RuntimeError("Malformed GitHub notification checkpoint") from None
     if not isinstance(state, dict):
@@ -124,10 +127,10 @@ def save():
         "message": "Store isolated notification checkpoint [skip ci]",
         "branch": branch,
         "sha": sha,
-        "content": base64.b64encode(
+        "content": base64.b64encode(seal_checkpoint(
             (json.dumps(state, ensure_ascii=False, indent=2) + "\n")
             .encode("utf-8")
-        ).decode("ascii"),
+        )).decode("ascii"),
     }
     # GitHub's sha-based precondition rejects concurrent writes. Never retry
     # with another base revision: doing so could discard delivered notices.
