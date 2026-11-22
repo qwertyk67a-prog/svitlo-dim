@@ -181,6 +181,18 @@ def trim_state(state: dict, today) -> int:
             if published < today - timedelta(days=21):
                 state.pop(key, None)
             continue
+        if key.startswith("official:incident:"):
+            # Retain unresolved active events until an official closure.
+            # Remove old closed incidents to keep the checkpoint bounded.
+            record = state.get(key)
+            if isinstance(record, dict) and record.get("status") != "active":
+                try:
+                    published = datetime.fromisoformat(record["published"]).date()
+                except (KeyError, TypeError, ValueError):
+                    continue  # Malformed records need explicit review.
+                if published < today - timedelta(days=21):
+                    state.pop(key, None)
+            continue
         date_text = None
         if key.startswith(("reminder:", "week:")):
             parts = key.split(":")
