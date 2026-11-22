@@ -609,3 +609,36 @@ def test_missing_unpublished_daily_table_is_not_a_source_error(tmp_path, monkeyp
     monkeypatch.setattr(bot, "telegram_send",
                         lambda *_args, **_kwargs: pytest.fail("Unexpected Telegram notice"))
     asyncio.run(bot.once())
+
+
+def test_unresolved_official_event_is_visible_failure_but_others_deliver(
+        tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    monkeypatch.setenv("ANNOUNCEMENTS_ENABLED", "true")
+    import alerts
+
+    monkeypatch.setattr(alerts, "fetch_official_page", lambda: "<html></html>")
+    monkeypatch.setattr(alerts, "region_candidates", lambda *_args, **_kwargs: [
+        (801, "official:unresolved:801",
+         {"status": "unresolved", "published": datetime.now(KYIV).isoformat()},
+         "Неоднозначна офіційна подія"),
+        (802, "official:status:area:region",
+         {"status": "active", "published": datetime.now(KYIV).isoformat()},
+         "Інше підтверджене офіційне повідомлення"),
+    ])
+
+    async def load(*_groups):
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", load)
+    sent = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda _token, _chat, message, deadline=None:
+                        sent.append(message))
+    with pytest.raises(RuntimeError, match="ambiguous_official_incident"):
+        asyncio.run(bot.once())
+    assert "Неоднозначна офіційна подія" in sent
+    assert "Інше підтверджене офіційне повідомлення" in sent
+    saved = bot.state_read(state_file)
+    assert saved["official:unresolved:801"]["status"] == "unresolved"
+    assert saved["official:status:area:region"]["status"] == "active"
