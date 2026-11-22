@@ -21,6 +21,28 @@ from house_reliability import queue_label
 LOG = logging.getLogger("outage-bot")
 
 
+SEND_WEEKLY_SCHEDULE = False
+COMPACT_DAILY_SCHEDULE = True
+
+
+def compact_daily_message(day, spans, *, group=None, conditional=False):
+    date_line = day.strftime("%d.%m.%Y")
+    if group is not None:
+        date_line += " · Черга " + html.escape(queue_label(group))
+    lines = [date_line]
+    if not spans:
+        lines.append("Відключення за графіком скасовано")
+        return "\n".join(lines)
+    for mode, label in (("off", "Відключення"), ("maybe", "Можливі відключення")):
+        if conditional and mode == "off":
+            continue
+        times = [f"{clock(a)}–{clock(b)}" for a, b, status in spans
+                 if conditional or status == mode]
+        if times:
+            lines.append(label + ": " + ", ".join(times))
+    return "\n".join(lines)
+
+
 def time_range(label):
     """Parse provider hourly '00-01' and minute-precision '00:00–01:00' slots."""
     source = str(label).strip()
@@ -750,6 +772,8 @@ async def once():
                         LOG.warning("Опублікована добова таблиця пошкоджена")
         for group in groups:
             for key, payload, kind, parts in collect_notifications(source, group, today, state):
+                if kind in ("week", "week_cancel") and not SEND_WEEKLY_SCHEDULE:
+                    continue
                 digest = fingerprint(payload)
                 old = state.get(key)
                 if state_digest(old) == digest:
@@ -849,7 +873,14 @@ async def once():
                 else:
                     LOG.warning("Невідомий тип графіка: %s", kind)
                     continue
-                if message:
+                if COMPACT_DAILY_SCHEDULE and kind in ("day", "day_cancel"):
+                    visible = new_visible if next_state["status"] == "outages" else []
+                    message = compact_daily_message(
+                        day, visible, group=group if len(groups) > 1 else None,
+                        conditional=uncertain_gpv,
+                    )
+                    enqueue(priority, key, next_state, message, "schedule")
+                elif message:
                     if house_groups is not None and len(house_groups) > 1:
                         message += (
                             f"\n⚠️ Для будинку {html.escape(operator_label())} вказує кілька черг. "
