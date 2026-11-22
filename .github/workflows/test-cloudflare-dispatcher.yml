@@ -21,6 +21,10 @@ jobs:
           node --version
           cd deploy/cloudflare-dispatcher
           node --test tests/*.test.mjs
+      - name: Dry-run Cloudflare Worker bundle without deployment or Secrets
+        run: |
+          cd deploy/cloudflare-dispatcher
+          npx --yes wrangler deploy --dry-run --outdir ../../.wrangler-dry-run
       - name: 'Verify safe default: dispatch enabled and watchdog disabled'
         run: |
           grep -q '^ENABLED = "true"$' deploy/cloudflare-dispatcher/wrangler.toml
