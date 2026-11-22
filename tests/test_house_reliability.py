@@ -578,3 +578,34 @@ def test_address_event_failure_is_reported_as_incomplete_run(tmp_path, monkeypat
         asyncio.run(bot.once())
     # Other valid notices are still sent and checkpointed.
     assert delivered
+
+
+def test_malformed_published_daily_table_fails_instead_of_silent_success(
+        tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    async def broken_schedule(*_args):
+        source, groups = fake_schedule(days=1)
+        day_key = next(iter(source.fact.days))
+        source.fact.days[day_key][groups[0]] = {"1": "unrecognized", "2": "yes"}
+        return source, groups
+    monkeypatch.setattr(bot, "get_schedule", broken_schedule)
+    sent = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_args, **_kwargs: sent.append(True))
+    with pytest.raises(RuntimeError, match="invalid_daily_fact"):
+        asyncio.run(bot.once())
+    assert sent == []
+
+
+def test_missing_unpublished_daily_table_is_not_a_source_error(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    async def unpublished(*_args):
+        source, groups = fake_schedule(days=1)
+        source.fact.days = {}
+        return source, groups
+    monkeypatch.setattr(bot, "get_schedule", unpublished)
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_args, **_kwargs: pytest.fail("Unexpected Telegram notice"))
+    asyncio.run(bot.once())
