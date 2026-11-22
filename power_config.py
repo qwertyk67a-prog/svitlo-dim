@@ -161,12 +161,12 @@ def _stable_address_identity(address):
     """
     city = " ".join(address["city"].casefold().split())
     street = " ".join(address["street"].casefold().split())
-    street = re.sub(r"^(?:вул\\.?|вулиця)\\s+", "вул ", street)
-    house = re.sub(r"\\s+", "", address["house"].casefold())
+    street = re.sub(r"^(?:вул\.?|вулиця)\s+", "вул ", street)
+    house = re.sub(r"\s+", "", address["house"].casefold())
     house = house.replace("a", "а").replace("b", "в").replace("i", "і")
     # Normalize separators only directly before a letter suffix. A numeric
     # slash denotes a distinct building: 1/1 and 11 must remain different.
-    house = re.sub(r"(?<=\\d)[./\\-](?=[а-яіїєґ]$)", "", house)
+    house = re.sub(r"(?<=\d)[./-](?=[а-яіїєґ]$)", "", house)
     return {"city": city, "street": street, "house": house}
 
 
