@@ -703,12 +703,15 @@ async def once():
         key: value.get("status") if isinstance(value, dict) else value
         for key, value in state.items()
         if key.startswith(("official:status:emergency:",
-                           "official:status:gav:"))
+                           "official:status:gav:",
+                           "official:incident:emergency:",
+                           "official:incident:gav:"))
     }
     for item in pending:
         _priority, _seq, key, value, _message, origin, _deadline, _cursor = item
         if origin == "official" and key.startswith(
-                ("official:status:emergency:", "official:status:gav:")):
+                ("official:status:emergency:", "official:status:gav:",
+                 "official:incident:emergency:", "official:incident:gav:")):
             emergency_states[key] = value.get("status")
     uncertain_gpv = any(x == "active" for x in emergency_states.values())
 
