@@ -199,3 +199,14 @@ def test_reminder_never_sent_after_deadline(monkeypatch):
         telegram_send("private-token","-123","Тест",deadline=on(0,0))
     post.assert_not_called()
 
+
+
+def test_cached_queue_timestamp_must_be_recent_and_timezone_aware():
+    from house_reliability import cached_queue_is_fresh
+    now = on(15, 0)
+    assert cached_queue_is_fresh((now - timedelta(hours=23)).isoformat(), now)
+    assert not cached_queue_is_fresh((now - timedelta(hours=25)).isoformat(), now)
+    assert not cached_queue_is_fresh((now + timedelta(minutes=2)).isoformat(), now)
+    assert not cached_queue_is_fresh(now.replace(tzinfo=None).isoformat(), now)
+    assert not cached_queue_is_fresh("not-a-date", now)
+    assert not cached_queue_is_fresh(None, now)
