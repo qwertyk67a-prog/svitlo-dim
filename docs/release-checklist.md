@@ -12,7 +12,8 @@ Secrets/Variables, create a restricted PAT, or deploy Cloudflare.
 - Private geography does not require map API calls.
 - A GitHub branch `bot-state` now exists with an empty JSON checkpoint.
 - The feature-branch `check.yml` reads and updates only that isolated branch.
-- Cloudflare dispatcher code is ready but is not deployed or activated.
+- The Cloudflare dispatcher has been deployed to production from `main` and
+  GitHub `workflow_dispatch` runs were observed every five minutes.
 
 ## 2. Optional free scheduling, without changing main
 
@@ -25,8 +26,10 @@ Secrets/Variables, create a restricted PAT, or deploy Cloudflare.
    workflow_dispatch jobs for 24 hours.
 6. This only accelerates triggering; GitHub-runner start delays remain.
 
-The dispatcher can target old `main` before the feature merge. Keep the
-existing GitHub native cron as a backup until reliability is measured.
+The dispatcher already targets `main`. Its `[vars].ENABLED` is `true` in
+`main` and in this feature branch to preserve dispatch continuity on merge.
+Keep the native GitHub cron as a fallback. Do not confuse the Cloudflare
+`ENABLED` switch with GitHub `BOT_ENABLED`.
 
 ## 3. New version read-only acceptance
 
@@ -78,3 +81,20 @@ existing GitHub native cron as a backup until reliability is measured.
 - Create a new empty isolated state branch, run preflight, then activate.
 - Only the ajax_v1 provider protocol is implemented. Other utility companies
   require tested adapters, not just different URLs.
+
+## 7. Newly audited release safety (22 November 2026)
+
+- Keep Cloudflare `ENABLED=true` across the PR merge. The previous draft
+  contained `false`, which would have disabled the deployed Cron Trigger.
+- The Telegram API token is deliberately **not** included in the state
+  namespace; rotating credentials must not reset existing dedup history.
+  The destination chat ID remains part of the namespace.
+- The migration copies `official:status:*` entries to preserve ongoing
+  regional GAV and emergency states alongside the official feed cursor.
+- The migration is still **unexecuted**. Do not mark the rollout complete
+  merely because 222 mocked tests pass.
+- The feature PR currently has merge conflicts against continuously updated
+  `main/bot_state.json`. Freeze main updates before resolving conflicts.
+- No authoritative unattended map-polygon verification of the historical
+  quarter is implemented; geographic assertions remain based on the private
+  operator-provided installation settings.
