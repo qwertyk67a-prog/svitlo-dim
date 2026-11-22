@@ -363,7 +363,11 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     async def unavailable(_secret):
         raise RuntimeError("provider temporary error")
     monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
-    seed_state(state_file, {"house:groups": ["GPV3.1"]})
+    seed_state(state_file, {
+        "house:groups": ["GPV3.1"],
+        "house:last_verified_at": datetime.now(KYIV).replace(
+            minute=0, second=0, microsecond=0).isoformat(),
+    })
     checked = []
     async def schedules(groups):
         checked.append(groups)
@@ -372,7 +376,10 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     messages = []
     monkeypatch.setattr(bot, "telegram_send",
                         lambda _t, _c, msg, deadline=None: messages.append(msg))
-    asyncio.run(bot.once())
+    # The cache preserves a valid notification, but the failed address
+    # verification MUST make the workflow fail visibly.
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
     assert checked == [("GPV3.1",)]
     assert len(messages) == 1
 
@@ -529,3 +536,45 @@ def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypat
     schedules=[x for x in sent if "Графік відключень" in x]
     assert len(schedules)==2
     assert all("Розподіл квартир між чергами не підтверджено" in x for x in schedules)
+
+
+def test_stale_address_queue_is_not_used_as_current_schedule(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    import alerts
+    async def unavailable(_secret):
+        raise RuntimeError("address provider unavailable")
+    monkeypatch.setattr(alerts, "fetch_address_status", unavailable)
+    seed_state(state_file, {
+        "house:groups": ["GPV3.1"],
+        "house:last_verified_at": (
+            datetime.now(KYIV) - timedelta(hours=30)
+        ).isoformat(),
+    })
+    checked = []
+    async def schedules(groups):
+        checked.append(groups)
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
+    assert checked == []
+
+
+def test_address_event_failure_is_reported_as_incomplete_run(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    setup(monkeypatch, state_file)
+    import alerts
+    def failed_event(*_args, **_kwargs):
+        raise RuntimeError("event decode failed")
+    monkeypatch.setattr(alerts, "address_decision", failed_event)
+    async def schedules(groups):
+        return fake_schedule(days=1)
+    monkeypatch.setattr(bot, "get_schedule", schedules)
+    delivered = []
+    monkeypatch.setattr(bot, "telegram_send",
+                        lambda *_args, **_kwargs: delivered.append(True))
+    with pytest.raises(RuntimeError, match="address_events"):
+        asyncio.run(bot.once())
+    # Other valid notices are still sent and checkpointed.
+    assert delivered
