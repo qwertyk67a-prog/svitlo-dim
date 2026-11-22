@@ -1,5 +1,6 @@
 """Official regional notices and address events for a configured operator."""
 import hashlib
+import hmac
 import html
 import json
 import logging
@@ -267,6 +268,42 @@ def event_record(event, now):
      }
 
 
+
+def _active_official_keys(state):
+    """Known active records by event type and affected territorial level."""
+    grouped = {}
+    for key, record in state.items():
+        parts = key.split(":")
+        if (len(parts) < 4 or parts[0] != "official"
+                or parts[1] not in ("status", "incident")):
+            continue
+        status = record.get("status") if isinstance(record, dict) else record
+        if status == "active":
+            grouped.setdefault((parts[2], parts[3]), set()).add(key)
+    return grouped
+
+
+def _dated_incident_key(event):
+    """HMAC-key an incident only if the official notice states its start.
+
+    An estimated end can change without making a new incident.
+    Missing timestamps cannot uniquely identify concurrent incidents.
+    """
+    started = published_event_start(event["post"])
+    if started is None:
+        return None
+    cfg = provider_config()
+    level = event["coverage"]["level"]
+    body = json.dumps(
+        (event["kind"], level, event["area"], started.isoformat()),
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hmac.new(
+        cfg["state_key"].encode("ascii"), body, hashlib.sha256
+    ).hexdigest()[:24]
+    return f"official:incident:{event['kind']}:{level}:{digest}"
+
+
 def region_candidates(page, state, now, scope=None):
     """Evaluate separately published provider events and previously edited posts.
 
@@ -295,6 +332,7 @@ def region_candidates(page, state, now, scope=None):
     hashes = dict(old_hashes)
     max_id = max(p["id"] for p in posts)
     by_scope = {}
+    active_keys = _active_official_keys(state)
     for post in posts:
         pid = str(post["id"])
         digest = hashlib.sha256(
@@ -326,7 +364,23 @@ def region_candidates(page, state, now, scope=None):
             continue
         if event["status"] == "active" and finish and finish <= now:
             event["status"] = "expired"
-        key = f"official:status:{event['kind']}:{coverage['level']}"
+        group = (event["kind"], coverage["level"])
+        key = _dated_incident_key(event)
+        if key is None:
+            possible = active_keys.get(group, set())
+            if len(possible) > 1:
+                # Without an incident identifier or explicit start, a
+                # blanket cancellation could falsely close the wrong outage.
+                # Mark the source incomplete rather than claim restoration.
+                raise RuntimeError(
+                    "Офіційна подія без часу початку: кілька активних аварій"
+                )
+            key = (next(iter(possible)) if possible else
+                   f"official:status:{event['kind']}:{coverage['level']}")
+        if event["status"] == "active":
+            active_keys.setdefault(group, set()).add(key)
+        else:
+            active_keys.setdefault(group, set()).discard(key)
         by_scope.setdefault(key, []).append((post["id"], event))
 
     pending = []
