@@ -42,7 +42,7 @@
   "house:groups": [
     "GPV6.2"
   ],
-  "official:last_id": 4875,
+  "official:last_id": 4876,
   "official:post_hashes": {
     "4845": "ccb23c1ec629b4fbd6195c6c",
     "4854": "31604ffa10b4b37b1930c0bf",
@@ -66,7 +66,8 @@
     "4872": "da8ddac921332ccd1a0b24d9",
     "4873": "980744fa8f707dad6996451b",
     "4874": "9a4d9e977b4aae2fef302e71",
-    "4875": "50661b1d6dfa730dd6c7d21c"
+    "4875": "50661b1d6dfa730dd6c7d21c",
+    "4876": "9e0c0eb598ae87aa442559b0"
   },
   "week:2026-11-16:GPV6.2": {
     "digest": "b0b472157c51fb1f1aa63873e0995bb322e073b24cfedce89e5bdae5c0487316",
