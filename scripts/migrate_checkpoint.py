@@ -40,8 +40,8 @@ def migrate_snapshot(raw, namespace):
 
 
 def run():
-    if os.getenv("BOT_ENABLED", "").strip().lower() == "true":
-        raise RuntimeError("Disable the old live monitor before migration")
+    if os.getenv("BOT_ENABLED", "").strip().lower() != "false":
+        raise RuntimeError("Disable the old live monitor explicitly before migration")
     if os.getenv("CONFIRM_MIGRATION") != "MIGRATE":
         raise RuntimeError("Explicit manual confirmation required")
     repository, branch, token, _path = settings()
