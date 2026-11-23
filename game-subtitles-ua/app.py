@@ -86,8 +86,11 @@ class Application:
     def __init__(self, root):
         self.root = root
         root.title(APP_TITLE)
-        root.geometry("1140x940")
-        root.minsize(930, 760)
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        root.geometry(f"{min(1140, max(780, screen_width-70))}x"
+                      f"{min(900, max(630, screen_height-100))}")
+        root.minsize(min(900, screen_width), min(680, screen_height))
         try:
             self.config = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -676,7 +679,7 @@ class Application:
                             ))
                             last_ocr = now
                         if source == "Экран Windows":
-                            time.sleep(0.04)
+                            time.sleep(0.08)
                         elif source == "Видео-файл":
                             fps = capture.get(cv2.CAP_PROP_FPS)
                             time.sleep(min(0.06, max(0.01, 1.0 / fps if fps > 0 else 0.03)))
