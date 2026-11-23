@@ -1,0 +1,9 @@
+opencv-python>=4.9,<5
+numpy>=1.26,<3
+Pillow>=10,<13
+pytesseract>=0.3.10,<0.4
+deep-translator>=1.11.4,<2
+edge-tts>=7,<9
+pygame>=2.6,<3
+pygrabber>=0.2,<1
+mss>=9,<12
