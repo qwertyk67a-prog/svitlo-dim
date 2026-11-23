@@ -1,4 +1,4 @@
-"""Game Subtitles UA — responsive Windows capture and bilingual speech."""
+"""Game Subtitles UA — low-latency live PS5 HDMI subtitles, translation and dual speech."""
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +19,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 from tkinter import filedialog, ttk, messagebox
 
-APP_TITLE = "Game Subtitles UA v0.3"
+APP_TITLE = "Game Subtitles UA v0.4 — PS5 Live"
 LANGS = {"Английский": "eng", "Русский": "rus", "Английский + русский": "eng+rus",
          "Украинский": "ukr", "Японский": "jpn", "Немецкий": "deu",
          "Французский": "fra", "Испанский": "spa", "Польский": "pol"}
@@ -41,6 +41,9 @@ VOICE_MODES = (
 )
 
 SETTINGS_FILE = Path.home() / ".game_subtitles_ua.json"
+CAPTURE_PROFILES = ("Авто (1080p)", "720p / 30 FPS", "Без настройки")
+MAX_SUBTITLE_AGE_SECONDS = 6.0
+
 
 
 def bundled_ocr():
@@ -63,6 +66,87 @@ def available_devices():
     except Exception:
         pass
     return [(f"Видео #{idx}", idx) for idx in range(8)]
+
+
+def is_nearly_black(frame):
+    """Heuristic only: a black HDMI signal may also be a dark game scene."""
+    if frame is None or frame.size == 0:
+        return True
+    sample = frame[::max(1, frame.shape[0] // 120), ::max(1, frame.shape[1] // 200)]
+    gray = cv2.cvtColor(sample, cv2.COLOR_BGR2GRAY)
+    return float(np.mean(gray)) < 6.0 and float(np.percentile(gray, 99)) < 16.0
+
+
+def crop_subtitle_area(frame, roi):
+    h, w = frame.shape[:2]
+    left, top, right, bottom = roi
+    x1, x2 = int(left * w), int(right * w)
+    y1, y2 = int(top * h), int(bottom * h)
+    x1, x2 = max(0, min(w, x1)), max(0, min(w, x2))
+    y1, y2 = max(0, min(h, y1)), max(0, min(h, y2))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return frame[y1:y2, x1:x2].copy()
+
+
+def parsed_ocr_words(data):
+    """Reconstruct game subtitles and calculate OCR confidence from Tesseract words."""
+    words, confidences = [], []
+    text_items = data.get("text", [])
+    conf_items = data.get("conf", [])
+    for value, confidence in zip(text_items, conf_items):
+        word = " ".join(str(value).split()).strip()
+        if not word:
+            continue
+        try:
+            conf = float(confidence)
+        except (ValueError, TypeError):
+            continue
+        if conf < 20:
+            continue
+        words.append(word)
+        confidences.append(conf)
+    return " ".join(words).strip(" -_|•"), (
+        sum(confidences) / len(confidences) if confidences else 0.0
+    )
+
+
+def subtitle_is_ready(text, confidence, repeats, ps5_mode):
+    """Accept readable short PS5 dialogue without requiring two whole OCR cycles."""
+    if not 2 <= len(text) <= 350:
+        return False
+    if ps5_mode and len(text) >= 7 and confidence >= 82.0:
+        return True
+    return repeats >= 2 and confidence >= (37 if ps5_mode else 30)
+
+
+def recognize_game_subtitle(crop, language, tessdata_path, ps5_mode):
+    """Read actual image pixels, not a subtitle file or PS5-side subtitle track."""
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    # Upscale small subtitle text, but bound OCR memory and latency.
+    width = max(1, gray.shape[1])
+    factor = min(2.3, max(1.0, 1500.0 / width))
+    if factor > 1.05:
+        gray = cv2.resize(gray, None, fx=factor, fy=factor,
+                          interpolation=cv2.INTER_CUBIC)
+    gray = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8)).apply(gray)
+    args = "--oem 1 --psm 6"
+    if tessdata_path and tessdata_path.is_dir():
+        args += f' --tessdata-dir "{tessdata_path}"'
+    def run(image):
+        data = pytesseract.image_to_data(
+            image, lang=language, config=args,
+            output_type=pytesseract.Output.DICT, timeout=2.5
+        )
+        return parsed_ocr_words(data)
+    best_text, best_conf = run(gray)
+    if ps5_mode and best_conf < 42:
+        # White subtitles with dark outlines sometimes need inversion.
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        alt_text, alt_conf = run(cv2.bitwise_not(binary))
+        if alt_conf > best_conf:
+            best_text, best_conf = alt_text, alt_conf
+    return best_text, best_conf
 
 
 def normalize_roi(rect, width, height):
@@ -105,13 +189,14 @@ class Application:
         self.active_source = None
         self.ocr_enabled = False
         self.capture_error = None
+        self.subtitle_serial = 0
         self.translate_jobs = queue.Queue(maxsize=1)
         self.speech_jobs = queue.Queue(maxsize=1)
         self.speech_serial = 0
         self.capture_serial = 0
         self.voice_turn = 0
         self.closing = False
-        self.roi = self.config.get("roi", [0.08, 0.68, 0.92, 0.94])
+        self.roi = self.config.get("roi", [0.10, 0.70, 0.90, 0.97])
         self.frame = None
         self.image = None
         self.image_box = (0, 0, 1.0)
@@ -124,7 +209,12 @@ class Application:
         self.devices = [("Видео #0", 0)]
         self.monitors = [("Монитор 1", 1)]
         self.voices_by_lang = {key: list(value) for key, value in VOICE_DEFAULTS.items()}
-        self.source = tk.StringVar(value=self.config.get("source", "Экран Windows"))
+        self.ps5_mode = tk.BooleanVar(value=self.config.get("ps5_mode", True))
+        self.capture_profile = tk.StringVar(value=self.config.get("capture_profile", CAPTURE_PROFILES[0]))
+        if self.capture_profile.get() not in CAPTURE_PROFILES:
+            self.capture_profile.set(CAPTURE_PROFILES[0])
+        self.capture_info = tk.StringVar(value="PS5: HDMI → карта захвата → USB Windows")
+        self.source = tk.StringVar(value=self.config.get("source", "Карта захвата"))
         if self.source.get() not in ("Экран Windows", "Карта захвата", "Видео-файл"):
             self.source.set("Экран Windows")
         self.device = tk.StringVar(value=self.config.get("device", ""))
@@ -171,7 +261,7 @@ class Application:
         section.pack(fill="x")
         first = ttk.Frame(section)
         first.pack(fill="x", pady=3)
-        ttk.Label(first, text="Источник:").pack(side="left")
+        ttk.Label(first, text="Источник (PS5 через карту захвата):").pack(side="left")
         self.source_box = ttk.Combobox(first, textvariable=self.source, state="readonly", width=16,
                      values=["Экран Windows", "Карта захвата", "Видео-файл"])
         self.source_box.pack(side="left", padx=6)
@@ -189,6 +279,20 @@ class Application:
         ttk.Label(second, text="Язык игры:").pack(side="left", padx=(10, 4))
         ttk.Combobox(second, textvariable=self.language, values=list(LANGS),
                      state="readonly", width=21).pack(side="left")
+        ps5_controls = ttk.Frame(section)
+        ps5_controls.pack(fill="x", pady=(6, 2))
+        ttk.Checkbutton(ps5_controls,
+                        text="PS5: быстрые игровые субтитры (живой HDMI, без видеофайла)",
+                        variable=self.ps5_mode,
+                        command=self._profile_changed).pack(side="left")
+        ttk.Label(ps5_controls, text="Режим HDMI:").pack(side="left", padx=(14, 4))
+        self.profile_box = ttk.Combobox(ps5_controls,
+                            textvariable=self.capture_profile, state="readonly",
+                            values=CAPTURE_PROFILES, width=19)
+        self.profile_box.pack(side="left")
+        self.profile_box.bind("<<ComboboxSelected>>", self._profile_changed)
+        ttk.Label(section, textvariable=self.capture_info,
+                  foreground="#555555").pack(anchor="w", pady=(3, 0))
 
         voice_section = ttk.LabelFrame(pane, text="2. Перевод и озвучка", padding=8)
         voice_section.pack(fill="x", pady=(10, 0))
@@ -291,6 +395,11 @@ class Application:
         except Exception as exc:
             self._event("status", f"Не удалось определить мониторы: {exc}")
         self._event("devices", (cameras, monitors))
+
+    def _profile_changed(self, _event=None):
+        if self.capture_running:
+            self._stop()
+        self._save()
 
     def _source_changed(self, _event=None):
         if self.capture_running:
@@ -490,7 +599,9 @@ class Application:
                 "male_ru": self.selected_voices["ru"]["Male"],
                 "speed": self.speed.get(),
                 "volume": self.volume.get(), "language": self.language.get(),
-                "device": self.device.get()},
+                "device": self.device.get(),
+                "ps5_mode": self.ps5_mode.get(),
+                "capture_profile": self.capture_profile.get()},
                 ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
@@ -535,6 +646,7 @@ class Application:
         self.last_sent = ""
         self.ocr_confirmations = 0
         self.last_ocr_at = 0
+        self.subtitle_serial += 1
         self._submit_latest(self.ocr_jobs, None)
 
     def _capture_options(self):
@@ -550,7 +662,8 @@ class Application:
         if source == "Видео-файл" and not Path(filename).is_file():
             raise RuntimeError("Выберите существующий видеофайл.")
         language = LANGS.get(self.language.get(), "eng")
-        return (source, idx, filename, language)
+        return (source, idx, filename, language,
+                bool(self.ps5_mode.get()), self.capture_profile.get())
 
     def _preview(self):
         try:
@@ -598,7 +711,8 @@ class Application:
         self.ocr_enabled = True
         self._reset_ocr_state()
         self.start_button["state"] = "disabled"
-        self.status.set("Перевод запущен. Распознавание текста каждые 0,6 секунды.")
+        self.status.set("PS5: чтение субтитров в реальном времени." if self.ps5_mode.get()
+                        else "Перевод запущен.")
 
     def _stop(self):
         self.stop_event.set()
@@ -627,15 +741,17 @@ class Application:
         except queue.Full:
             pass
 
-    def _capture(self, source, index, filename, language, session):
+    def _capture(self, source, index, filename, language, ps5_mode, profile, session):
         capture = None
         screen = None
-        frame_count = 0
         last_preview = 0
         last_ocr = 0
-        error = None
+        capture_start = time.monotonic()
+        last_stats = capture_start
+        received = 0
+        black_since = None
         try:
-            # Serializes opening/closing hardware devices on rapid start-stop.
+            # Never initialize PS5 camera devices in the Tk GUI event loop.
             with self.capture_lock:
                 if session != self.capture_serial or self.stop_event.is_set():
                     return
@@ -649,35 +765,47 @@ class Application:
                     elif source == "Видео-файл":
                         capture = cv2.VideoCapture(filename)
                     else:
-                        capture = cv2.VideoCapture(index, cv2.CAP_DSHOW)
-                        if not capture.isOpened():
-                            capture.release()
-                            capture = cv2.VideoCapture(index, cv2.CAP_MSMF)
-                        if capture.isOpened():
-                            capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-                            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                        capture = self._open_ps5_card(index, profile)
                     if capture is not None and not capture.isOpened():
-                        raise RuntimeError("Источник не открылся. Проверьте HDMI, USB и доступ приложения к камере.")
-                    self._event("status", "Источник открыт. Выделите область субтитров.")
+                        raise RuntimeError("Источник не открылся. Проверьте HDMI, USB и настройки PS5.")
+                    self._event("status", "Видеопоток подключён. Выделите область субтитров.")
+                    interval = 0.33 if ps5_mode else 0.60
                     while not self.stop_event.is_set() and session == self.capture_serial:
                         if screen is not None:
-                            frame = cv2.cvtColor(np.asarray(screen.grab(region)), cv2.COLOR_BGRA2BGR)
+                            frame = cv2.cvtColor(np.asarray(screen.grab(region)),
+                                                 cv2.COLOR_BGRA2BGR)
                             ok = True
                         else:
                             ok, frame = capture.read()
                         if not ok or frame is None:
-                            raise RuntimeError("Источник не выдаёт кадры или видео закончилось.")
+                            raise RuntimeError("Нет новых видеокадров. Проверьте сигнал PS5 и карту захвата.")
                         now = time.monotonic()
-                        frame_count += 1
-                        if now - last_preview >= 0.15:
+                        received += 1
+                        if now - last_preview >= 0.16:
                             self._put_latest_preview(frame, session)
                             last_preview = now
-                        if self.ocr_enabled and now - last_ocr >= 0.60:
-                            self._submit_latest(self.ocr_jobs, (
-                                session, frame.copy(), language, tuple(self.roi),
-                                self.target_code
-                            ))
+                        if self.ocr_enabled and now - last_ocr >= interval:
+                            cropped = crop_subtitle_area(frame, tuple(self.roi))
+                            if cropped is not None:
+                                self._submit_latest(self.ocr_jobs, (
+                                    session, cropped, language, self.target_code,
+                                    ps5_mode, now
+                                ))
                             last_ocr = now
+                        if source == "Карта захвата" and now - last_stats >= 2.0:
+                            if is_nearly_black(frame):
+                                black_since = black_since or now
+                            else:
+                                black_since = None
+                            if black_since is not None and now - black_since >= 2.0:
+                                self._event("capture_info",
+                                   "Почти чёрный HDMI-поток: проверьте HDCP на PS5, вход HDMI IN и сигнал.")
+                            else:
+                                fps = received / max(.01, now-capture_start)
+                                self._event("capture_info",
+                                  f"PS5 HDMI | {frame.shape[1]}×{frame.shape[0]} | "
+                                  f"примерно {fps:.1f} FPS | кадры читаются")
+                            last_stats = now
                         if source == "Экран Windows":
                             time.sleep(0.08)
                         elif source == "Видео-файл":
@@ -689,10 +817,41 @@ class Application:
                     if screen is not None:
                         screen.close()
         except Exception as exc:
-            error = str(exc)
-            self._event("capture_error", (session, error))
+            self._event("capture_error", (session, str(exc)))
         finally:
             self._event("finished", session)
+
+    def _open_ps5_card(self, index, profile):
+        # Cards advertise different combinations of DirectShow/MSMF, MJPEG
+        # and resolution. Only retain a backend after it returns a real frame.
+        plans = [(cv2.CAP_DSHOW, profile), (cv2.CAP_DSHOW, "Без настройки"),
+                 (cv2.CAP_MSMF, "Без настройки")]
+        for backend, selected in plans:
+            capture = None
+            try:
+                self._event("capture_info",
+                            f"Подключение PS5: {'DirectShow' if backend == cv2.CAP_DSHOW else 'Media Foundation'}"
+                            f" / {selected}")
+                capture = cv2.VideoCapture(index, backend)
+                if not capture.isOpened():
+                    capture.release()
+                    continue
+                if selected != "Без настройки":
+                    capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    dimensions = (1280, 720) if selected == "720p / 30 FPS" else (1920, 1080)
+                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, dimensions[0])
+                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, dimensions[1])
+                    capture.set(cv2.CAP_PROP_FPS, 30)
+                ok, frame = capture.read()
+                if ok and frame is not None:
+                    return capture
+            except Exception:
+                pass
+            if capture is not None:
+                capture.release()
+        raise RuntimeError(
+            "Карта захвата не отдаёт кадры. Проверьте HDMI IN, HDCP, USB и формат вывода PS5."
+        )
 
     def _ocr_worker(self):
         blank_at = None
@@ -701,37 +860,24 @@ class Application:
             if item is None:
                 blank_at = None
                 continue
-            session, frame, language, roi, target = item
+            session, crop, language, target, ps5_mode, stamp = item
             if session != self.capture_serial or not self.ocr_enabled:
                 continue
             try:
-                h, w = frame.shape[:2]
-                l, t, r, b = roi
-                crop = frame[int(t*h):max(int(t*h)+1,int(b*h)),
-                             int(l*w):max(int(l*w)+1,int(r*w))]
-                if crop.size == 0:
-                    continue
-                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-                # Limit OCR image scale to avoid exhausting RAM on 4K screens.
-                scale = min(2.0, max(1.0, 1800.0/max(gray.shape[:2])))
-                if scale > 1:
-                    gray = cv2.resize(gray, None, fx=scale, fy=scale,
-                                      interpolation=cv2.INTER_CUBIC)
-                gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(gray)
                 pytesseract.pytesseract.tesseract_cmd = str(self.ocr_path)
-                args = "--psm 6"
-                if self.tessdata_path and self.tessdata_path.is_dir():
-                    args += f' --tessdata-dir "{self.tessdata_path}"'
-                raw = pytesseract.image_to_string(gray, lang=language, config=args,
-                                                   timeout=4.0)
+                line, confidence = recognize_game_subtitle(
+                    crop, language, self.tessdata_path, ps5_mode
+                )
                 if session != self.capture_serial or not self.ocr_enabled:
                     continue
-                line = " ".join(raw.split()).strip(" -_|•")
                 now = time.monotonic()
+                # Discard OCR results from frames already overtaken by dialogue.
+                if now - stamp >= MAX_SUBTITLE_AGE_SECONDS:
+                    continue
                 if len(line) < 2 or len(line) > 350:
                     if blank_at is None:
                         blank_at = now
-                    if now - blank_at > 1.2:
+                    if now - blank_at > 1.0:
                         self.last_sent = ""
                     self.ocr_confirmations = 0
                 else:
@@ -741,25 +887,33 @@ class Application:
                     else:
                         self.ocr_confirmations = 1
                     self.last_ocr = line
-                    if self.ocr_confirmations >= 2 and not text_similar(line, self.last_sent):
+                    if subtitle_is_ready(line, confidence, self.ocr_confirmations,
+                                         ps5_mode) and not text_similar(line, self.last_sent):
                         self.last_sent = line
-                        self._event("original", (session, line))
-                        self._submit_latest(self.translate_jobs, (session, line, target))
+                        self.subtitle_serial += 1
+                        current = self.subtitle_serial
+                        self._event("original", (session, current, line))
+                        self._submit_latest(self.translate_jobs,
+                                            (session, current, line, target, stamp))
             except RuntimeError as exc:
-                self._event("status", f"Ошибка OCR: {exc}")
+                self._event("status", f"OCR: {exc}")
             except Exception as exc:
                 self._event("status", f"Ошибка распознавания: {exc}")
 
     def _translator(self):
         from deep_translator import GoogleTranslator
         while True:
-            session, text, target = self.translate_jobs.get()
-            if session != self.capture_serial or self.stop_event.is_set():
+            session, subtitle_serial, text, target, detected_at = self.translate_jobs.get()
+            if (session != self.capture_serial or self.stop_event.is_set()
+                    or subtitle_serial != self.subtitle_serial):
                 continue
             try:
                 result = GoogleTranslator(source="auto", target=target).translate(text)
-                if result and session == self.capture_serial and not self.stop_event.is_set():
-                    self._event("translation", (session, target, result))
+                if (result and session == self.capture_serial
+                        and subtitle_serial == self.subtitle_serial
+                        and not self.stop_event.is_set()
+                        and time.monotonic()-detected_at < MAX_SUBTITLE_AGE_SECONDS):
+                    self._event("translation", (session, subtitle_serial, target, result))
             except Exception as exc:
                 self._event("status", f"Ошибка перевода: {exc}")
 
@@ -873,15 +1027,18 @@ class Application:
                     self.voices_by_lang = data
                     self._update_voice_options()
                 elif kind == "original":
-                    session, line = data
-                    if session == self.capture_serial:
+                    session, subtitle_serial, line = data
+                    if session == self.capture_serial and subtitle_serial == self.subtitle_serial:
                         self.subtitle.set(line)
                         self.translation.set("Перевод…")
                 elif kind == "translation":
-                    session, language, text = data
-                    if session == self.capture_serial and language == self.target_code:
+                    session, subtitle_serial, language, text = data
+                    if (session == self.capture_serial and subtitle_serial == self.subtitle_serial
+                            and language == self.target_code):
                         self.translation.set(text)
                         self._queue_speech(text)
+                elif kind == "capture_info":
+                    self.capture_info.set(data)
                 elif kind == "status":
                     self.status.set(data)
                 elif kind == "capture_error":
