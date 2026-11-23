@@ -722,6 +722,7 @@ def address_decision(entry, state, now, expected=None):
         if not isinstance(old, dict) or old.get("digest") != digest:
             result.append(("address", key, {
                 "digest": digest,
+                "start": event["start"],
                 "end": event["end"],
                 "status": "active",
             }, address_message(event, changed=old_active, now=now)))
