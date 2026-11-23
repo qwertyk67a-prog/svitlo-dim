@@ -103,7 +103,7 @@ export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now
     if (old?.status === "alerted") {
       await sendTelegram(
         env,
-        "✅ SVITLO-DIM: успішні автоматичні перевірки відновлено. " +
+        "✅ Контроль запусків: успішні автоматичні перевірки відновлено. " +
         "Це не підтверджує наявність електрики за конкретною адресою.",
         fetchFn
       );
@@ -113,7 +113,7 @@ export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now
       return "recovered";
     }
     if (!old && env.WATCHDOG_CONFIRM_SETUP === "true") {
-      await sendTelegram(env, "✅ SVITLO-DIM: тестове особисте повідомлення. Контроль запусків GitHub увімкнено.", fetchFn);
+      await sendTelegram(env, "✅ Контроль запусків: тестове особисте повідомлення. Контроль запусків GitHub увімкнено.", fetchFn);
     }
     if (old?.status === "suspect" || !old) {
       await env.WATCHDOG_KV.put(
@@ -137,7 +137,7 @@ export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now
 
   await sendTelegram(
     env,
-    "⚠️ SVITLO-DIM: не вдається підтвердити роботу автоматичних перевірок. " +
+    "⚠️ Контроль запусків: не вдається підтвердити роботу автоматичних перевірок. " +
     "Немає недавнього успішного запуску або GitHub API недоступний. " +
     "Це НЕ підтверджує відключення електрики. Перевірте GitHub Actions.",
     fetchFn

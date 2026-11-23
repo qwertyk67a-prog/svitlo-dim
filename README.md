@@ -114,3 +114,14 @@ Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Neve
 ## Independent scheduler
 
 Follow [Cloudflare setup](deploy/cloudflare-dispatcher/README.md) for the dispatcher and its private administrator watchdog. Every installation needs a separate Telegram destination, encryption key and state. A new repository must have Actions enabled. Keep the default branch named main.
+
+When a supplier has no public Telegram bulletin channel, omit telegram_feed
+and set the repository Secret ANNOUNCEMENTS_ENABLED to false. Address queries
+and daily schedules still require ajax_v1. The site and AJAX endpoint must
+use the same hostname. Verify the actual house and daily schedule using the
+read-only workflows before activating a copy.
+
+Both Telegram bots can have any username. Manual discovery accepts group
+commands. Delivery test mode accepts an explicit numeric private, group,
+supergroup or channel ID. Administrator delivery uses the private numeric
+chat ID in the Worker runtime Secrets.

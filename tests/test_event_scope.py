@@ -206,3 +206,11 @@ def test_same_street_and_house_need_the_configured_city():
         for address in ("вул. Умовна", "вул. Умовна, буд. 12Г"):
             assert not covers_house(f"{prefix}: знеструмлено {address}", FULL)
     assert covers_house("Зелений Бір: знеструмлено вул. Умовна, буд. 12Г", FULL)
+
+
+def test_multiword_street_and_compound_house_are_matched_in_full():
+    scope = {**FULL, "street": "вул. Тихий Берег", "house": "42А/1"}
+    msg = "Зелений Бір: знеструмлено вул. Тихий Берег, буд. "
+    assert coverage_for_house(msg + "42А/1", scope)["level"] == "house"
+    for other in ("42/1", "42Б/1", "42А/11"):
+        assert not covers_house(msg + other, scope)

@@ -84,18 +84,23 @@ def provider_config(*, required=True):
     if not isinstance(prefix, str) or len(prefix) > 24:
         raise ConfigurationError("Invalid queue_display_prefix")
     config["queue_display_prefix"] = prefix
-    for key in ("site_url", "ajax_url", "telegram_feed"):
+    for key in ("site_url", "ajax_url"):
         config[key] = _https_url(config.get(key), key)
     host = urlparse(config["site_url"]).hostname
     if urlparse(config["ajax_url"]).hostname != host:
         raise ConfigurationError("site_url and ajax_url hosts must match")
-    feed = urlparse(config["telegram_feed"])
-    if feed.hostname not in ("t.me", "telegram.me"):
-        raise ConfigurationError("telegram_feed must be a Telegram channel")
-    slug = re.fullmatch(r"/s/([A-Za-z0-9_]{5,32})", feed.path)
-    if not slug:
-        raise ConfigurationError("telegram_feed must use public /s/channel format")
-    config["channel_slug"] = slug.group(1)
+    if config.get("telegram_feed"):
+        config["telegram_feed"] = _https_url(config["telegram_feed"], "telegram_feed")
+        feed = urlparse(config["telegram_feed"])
+        if feed.hostname not in ("t.me", "telegram.me"):
+            raise ConfigurationError("telegram_feed must be a Telegram channel")
+        slug = re.fullmatch(r"/s/([A-Za-z0-9_]{5,32})", feed.path)
+        if not slug:
+            raise ConfigurationError("telegram_feed must use public /s/channel format")
+        config["channel_slug"] = slug.group(1)
+    else:
+        config["telegram_feed"] = ""
+        config["channel_slug"] = ""
     for key in ("city_forms", "region_forms"):
         config[key] = _forms(config.get(key), key)
     for key in ("other_places", "other_regions", "headline_prefixes"):

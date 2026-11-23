@@ -489,8 +489,11 @@ def region_candidates(page, state, now, scope=None):
 
 
 def fetch_official_page():
+    feed = provider_config()["telegram_feed"]
+    if not feed:
+        raise RuntimeError("Офіційний Telegram-канал оператора не налаштовано")
     response = requests.get(
-        provider_config()["telegram_feed"], timeout=22,
+        feed, timeout=22,
         headers={"User-Agent": "Mozilla/5.0 (compatible; SVITLO/1.0)"},
     )
     response.raise_for_status()

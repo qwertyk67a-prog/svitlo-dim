@@ -94,19 +94,19 @@ def main():
         print("ID надіслано у групу Telegram; у GitHub-журналі його немає")
         return
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not re.fullmatch(r"-\d+", chat_id):
-        raise SetupError("Потрібен від'ємний ID групи в секреті TELEGRAM_CHAT_ID")
+    if not re.fullmatch(r"-?[1-9]\d*", chat_id):
+        raise SetupError("Потрібен числовий ID чату в секреті TELEGRAM_CHAT_ID")
     chat = call_telegram(token, "getChat", chat_id=chat_id)
     if not isinstance(chat, dict) or str(chat.get("id")) != chat_id:
         raise SetupError("Ідентифікатор групи не підтверджено")
-    if chat.get("type") not in ("group", "supergroup"):
-        raise SetupError("Чат не є Telegram-групою")
+    if chat.get("type") not in ("private", "group", "supergroup", "channel"):
+        raise SetupError("Невідомий тип чату Telegram")
     call_telegram(
         token, "sendMessage", chat_id=chat_id, disable_notification="true",
         text=("✅ Тестове повідомлення бота відключень.\n"
-              "З'єднання з Telegram працює. Моніторинг ще не активований."),
+              "З'єднання з Telegram працює. Тест доставки завершено."),
     )
-    print("Одне тестове повідомлення надіслано. Моніторинг не активований.")
+    print("Одне тестове повідомлення надіслано.")
 
 
 if __name__ == "__main__":

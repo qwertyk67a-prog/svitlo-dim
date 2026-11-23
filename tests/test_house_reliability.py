@@ -747,3 +747,43 @@ def test_disabled_weekly_delivery_preserves_checkpoint(kind, tmp_path, monkeypat
     asyncio.run(bot.once())
     assert sent == []
     assert bot.state_read(path)[key] == old
+
+
+def test_two_installations_route_only_to_their_own_chat(tmp_path, monkeypatch):
+    import alerts
+    deliveries = []
+    for n in (1, 2):
+        path = tmp_path / f"state-{n}.json"
+        setup(monkeypatch, path)
+        group = f"Zone:{n}"
+        city = f"Тестоград {n}"
+        token, chat = f"test-token-{n}", f"-10000{n}"
+        config = dict(TEST_CONFIG, operator=f"Оператор {n}",
+                      city_label=city, city_forms=[city],
+                      region_label=f"Область {n}", region_forms=[f"Область {n}"],
+                      site_url=f"https://utility{n}.invalid/schedule",
+                      ajax_url=f"https://utility{n}.invalid/ajax",
+                      queue_catalog=[group], queue_display_prefix="",
+                      state_key=hashlib.sha256(token.encode()).hexdigest(),
+                      address=dict(TEST_CONFIG["address"], city=city, house=f"{n}А/1"))
+        config.pop("telegram_feed")
+        monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config))
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", token)
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", chat)
+
+        async def home(raw):
+            assert json.loads(raw)["city"] == city
+            assert json.loads(raw)["house"] == f"{n}А/1"
+            return address_entry([group])
+
+        async def schedule(groups):
+            assert list(groups) == [group]
+            return fake_schedule(group, days=1)
+
+        monkeypatch.setattr(alerts, "fetch_address_status", home)
+        monkeypatch.setattr(bot, "get_schedule", schedule)
+        monkeypatch.setattr(bot, "telegram_send",
+                            lambda token, chat, msg, deadline=None: deliveries.append((token, chat)))
+        asyncio.run(bot.once())
+        asyncio.run(bot.once())
+    assert deliveries == [("test-token-1","-100001"), ("test-token-2","-100002")]

@@ -444,3 +444,24 @@ def test_list_directory_keeps_multiple_rows_for_one_house():
     ]})
     assert parsed.houses["42"].group_ids == ["GPV3.1", "GPV2.1"]
     assert parsed.houses["42"].sub_type == "ремонт"
+
+
+def test_composite_queue_names_and_legacy_keys():
+    from bot import _map_state_key
+    tokens = {"Z":"Q" + "1"*24, "Z:Північ":"Q" + "2"*24}
+    reverse = {v:k for k,v in tokens.items()}
+    for prefix, suffix in [("", ""), ("week:", ""), ("reminder:", ":360:15")]:
+        start = prefix + "2026-11-22:"
+        key = start + "Z:Північ" + suffix
+        anonymized = _map_state_key(key, tokens)
+        assert anonymized == start + tokens["Z:Північ"] + suffix
+        assert _map_state_key(anonymized, reverse) == key
+        assert _map_state_key(start + tokens["Z"] + ":Північ" + suffix, reverse) == key
+
+
+def test_address_config_without_operator_telegram(monkeypatch):
+    config = dict(TEST_CONFIG)
+    config.pop("telegram_feed")
+    monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config))
+    assert provider_config()["telegram_feed"] == ""
+    assert json.loads(address_json()) == TEST_CONFIG["address"]

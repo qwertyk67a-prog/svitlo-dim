@@ -450,18 +450,24 @@ def _map_state_key(key, mapping):
     """Change only queue components of known checkpoint keys."""
     if not isinstance(key, str):
         return key
-    parts = key.split(":")
-    if (len(parts) >= 3 and parts[0] in ("week", "reminder")
-            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[1])):
-        index = 2
-    elif len(parts) >= 2 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[0]):
-        index = 1
-    else:
+    match = re.fullmatch(r"((?:week:|reminder:)?\d{4}-\d{2}-\d{2}:)(.+)", key)
+    if not match:
         return key
-    if parts[index] not in mapping:
-        return key
-    parts[index] = mapping[parts[index]]
-    return ":".join(parts)
+    prefix, queue = match.groups()
+    suffix = ""
+    if prefix.startswith("reminder:"):
+        parts = queue.rsplit(":", 2)
+        if len(parts) != 3 or not all(part.isdigit() for part in parts[1:]):
+            return key
+        queue, start, lead = parts
+        suffix = f":{start}:{lead}"
+    if queue in mapping:
+        return prefix + mapping[queue] + suffix
+    # Restore older checkpoints that pseudonymized only a composite ID's prefix.
+    head, separator, tail = queue.partition(":")
+    if separator and re.fullmatch(r"Q[0-9a-f]{24}", head) and head in mapping:
+        return prefix + mapping[head] + ":" + tail + suffix
+    return key
 
 
 def _map_state_values(value, mapping):

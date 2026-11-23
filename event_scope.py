@@ -78,7 +78,7 @@ def _known_city(scope):
 def _exact_house(text, scope):
     street = _clean(scope["street"])
     street = re.sub(r"^(?:вул\.?|вулиця|просп\.?|проспект)\s+", "", street)
-    street = re.sub(r"\s+", r"\\s+", re.escape(street))
+    street = re.escape(street).replace(r"\ ", r"\s+")
     from alerts import normalized_house
     house = normalized_house(scope["house"])
     match = re.fullmatch(r"(\d+)([а-яіїєґ]?)(?:/(\d+[а-яіїєґ]?))?", house)
@@ -88,16 +88,12 @@ def _exact_house(text, scope):
     letter_regex = {"а": "[аa]", "в": "[вb]", "і": "[іi]"}.get(
         letter, re.escape(letter)
     )
+    number_regex = rf"(?<![\d/]){re.escape(number)}"
+    if letter:
+        number_regex += rf"[\s\-]*{letter_regex}"
     if subnumber:
-        number_regex = (
-            rf"(?<![\d/]){re.escape(number)}\s*/\s*"
-            rf"{re.escape(subnumber)}(?![\w/])"
-        )
-    else:
-        number_regex = (
-            rf"(?<![\d/]){re.escape(number)}[\s\-]*"
-            rf"{letter_regex}(?![\w/])"
-        )
+        number_regex += rf"\s*/\s*{re.escape(subnumber)}"
+    number_regex += r"(?![\w/]|\s*/\s*[\w]|[.\-][\w])"
     return bool(re.search(
         rf"\b{street}\b[\s,;:№#.\-/\\]*(?:буд(?:инок)?\.?\s*№?\s*)?"
         rf"[\s,;:№#.\-/\\]{{0,18}}{number_regex}", text
