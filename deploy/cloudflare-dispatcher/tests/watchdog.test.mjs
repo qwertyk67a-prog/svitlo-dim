@@ -226,3 +226,16 @@ test("independent watchdog works with dispatch disabled and missing PAT", async 
     globalThis.fetch = original;
   }
 });
+
+test("a successful scheduled run must have executed the production check", async () => {
+  for (const conclusion of ["skipped", "success"]) {
+    const kv = storage();
+    const run = { ...record(1), id: 12, event: "schedule" };
+    const mockFetch = async url => url.endsWith("/12/jobs") ?
+      response(200, {jobs: [{conclusion: "success", steps: [
+        {name: "Read configured source and notify Telegram", conclusion},
+      ]}]}) : response(200, {workflow_runs: [run]});
+    assert.equal(await checkExternalHealth(env(kv), mockFetch, T),
+      conclusion === "success" ? "healthy" : "suspect");
+  }
+});

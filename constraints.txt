@@ -1,4 +1,4 @@
-# Versions confirmed in GitHub Actions Python 3.12 on 19 November 2026.
+# Versions confirmed in GitHub Actions Python 3.12 on 23 November 2026.
 # This is a deployment-specific pin set, not a security guarantee.
 PyYAML==6.0.3
 annotated-types==0.8.0
@@ -7,10 +7,12 @@ certifi==2026.10.23
 cffi==2.1.1
 cryptography==50.0.2
 charset_normalizer==3.5.2
-curl-cffi==0.14.0
+curl-cffi==0.15.0
 greenlet==3.5.6
 idna==3.20
 iniconfig==2.3.1
+markdown-it-py==4.3.0
+mdurl==0.1.2
 packaging==26.3
 playwright==1.65.2
 playwright-stealth==2.0.3
@@ -21,6 +23,7 @@ pydantic-core==2.50.5
 pygments==2.21.0
 pytest==9.2.0
 requests==2.34.2
+rich==15.0.0
 soupsieve==4.1.2
 typing-extensions==4.16.0
 typing-inspection==0.4.5

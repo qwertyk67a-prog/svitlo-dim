@@ -48,10 +48,13 @@ function deploy() {
     config.kv_namespaces = [{ binding: "WATCHDOG_KV", id: cfg.namespace }];
     writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
     writeFileSync(secretsPath, JSON.stringify({ TARGET_REPOSITORY: cfg.repository }), { mode: 0o600 });
-    const args = ["--yes", "wrangler", "deploy", "--config", configPath];
+    const root = fileURLToPath(new URL(".", import.meta.url));
+    const install = spawnSync("npm", ["ci", "--include=dev", "--no-audit", "--no-fund"], { cwd: root, stdio: "ignore" });
+    if (install.status !== 0) throw new Error("Pinned Worker build dependencies could not be installed.");
+    const args = [join(root, "node_modules/wrangler/bin/wrangler.js"), "deploy", "--config", configPath];
     if (dryRun) args.push("--dry-run", "--outdir", join(directory, "bundle"));
     else args.push("--secrets-file", secretsPath);
-    const result = spawnSync("npx", args, { stdio: dryRun ? "inherit" : "ignore" });
+    const result = spawnSync(process.execPath, args, { stdio: dryRun ? "inherit" : "ignore" });
     if (result.status !== 0) throw new Error("Wrangler deployment failed. Check build permissions and resource settings.");
   } finally {
     rmSync(directory, { recursive: true, force: true });

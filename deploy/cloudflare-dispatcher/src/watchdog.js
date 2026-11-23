@@ -37,20 +37,31 @@ async function githubHealthy(repository, token, fetchFn, nowMs) {
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "svitlo-external-watchdog",
   };
-  let response;
-  try {
-    response = await fetchFn(url, {
+  async function read(endpoint) {
+    let response = await fetchFn(endpoint, {
       headers: token ? { ...standardHeaders, Authorization: "Bearer " + token } : standardHeaders,
       signal: AbortSignal.timeout(15000),
     });
     if (token && (response.status === 401 || response.status === 403)) {
-      // Public repository history remains readable if the dispatch PAT
-      // expires or is revoked. Do not use it for Telegram requests.
-      response = await fetchFn(url, { headers: standardHeaders, signal: AbortSignal.timeout(15000) });
+      response = await fetchFn(endpoint, { headers: standardHeaders, signal: AbortSignal.timeout(15000) });
     }
-    if (!response.ok) return false;
-    const value = await response.json();
-    return assessRuns(value?.workflow_runs, nowMs);
+    return response.ok ? response.json() : null;
+  }
+  try {
+    const history = await read(url);
+    if (!Array.isArray(history?.workflow_runs)) return false;
+    const recent = history.workflow_runs.filter(run => assessRuns([run], nowMs));
+    // A dispatch fails when disabled. A native schedule can succeed after skipping the monitor.
+    if (recent.some(run => run.event === "workflow_dispatch")) return true;
+    for (const run of recent) {
+      if (!Number.isSafeInteger(run.id) || run.id <= 0) continue;
+      const details = await read("https://api.github.com/repos/" + repository +
+        "/actions/runs/" + run.id + "/jobs");
+      if (details?.jobs?.some(job => job.conclusion === "success" &&
+          job.steps?.some(step => step.name === "Read configured source and notify Telegram" &&
+            step.conclusion === "success"))) return true;
+    }
+    return false;
   } catch (_e) {
     // GitHub might be offline. Let independent Telegram report this.
     return false;
