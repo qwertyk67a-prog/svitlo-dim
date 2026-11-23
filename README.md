@@ -5,10 +5,33 @@ city/region names and official channel identifiers belong only in Secrets.
 
 ## Provider protocol
 
-The ajax_v1 adapter understands a particular form-encoded schedule API.
-Other energy suppliers may use different schemas. Changing just a URL is
-NOT proof of compatibility. Add and test a new adapter before activation.
-Unknown providers fail closed.
+Select the adapter inside the existing POWER_CONFIG_JSON secret. The current
+ajax_v1 setting keeps the original operator site, address API and Telegram feed.
+
+For official HTTPS GET JSON feeds, select mapped_json_v1. Set site_url to the
+address directory and ajax_url to the schedule feed. The feeds can use
+different hostnames. Keep telegram_feed for regional bulletins. Add a mapping
+object to the same secret. This example uses synthetic field names:
+
+~~~json
+{
+  "addresses": ["directory"], "city": ["city"], "street": ["street"],
+  "house": ["building"], "queues": ["groups"],
+  "labels": ["periods"], "days": ["schedules"], "date": ["date"],
+  "queue": ["group"], "slots": ["availability"],
+  "statuses": {"available": "yes", "outage": "no"}
+}
+~~~
+
+Paths are lists of JSON keys. An empty path selects the whole document.
+Address rows must identify city, street, house and queue(s). Daily rows must
+identify a local ISO date, one queue and a complete dictionary of slots.
+The labels dictionary maps each slot key to a time range covering part of
+the day. All ranges together must cover the whole day. Map each source status
+explicitly. Optional address paths sub_type, start_date, end_date and type
+supply outage details. Optional weekly selects a group/weekday/slots dictionary.
+Both feeds must be accessible without authentication. Unsupported formats
+require another reader. Verify address and dry-run before changing delivery.
 
 ## Required GitHub Actions Repository Secrets
 

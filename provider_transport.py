@@ -1,7 +1,7 @@
 """Compatible AJAX schedule transport with no baked-in network operator.
 
 Format adapter: form-encoded Yii-style 'getHomeNum' and 'checkDisconUpdate'.
-Different company protocols require a separate, tested adapter.
+An installation can also select field-mapped JSON feeds.
 """
 import base64
 import logging
@@ -309,7 +309,26 @@ async def ajax_post(config, form):
     return result
 
 
+async def _read_json(url):
+    try:
+        async with AsyncSession(timeout=22) as session:
+            response = await session.get(url, allow_redirects=False)
+            if response.status_code == 429:
+                raise ProviderRateLimit("Official source rate limited requests")
+            if response.status_code != 200:
+                raise RuntimeError("Official JSON endpoint unavailable")
+            return response.json()
+    except ProviderRateLimit:
+        raise
+    except Exception:
+        raise RuntimeError("Official JSON request failed") from None
+
+
 async def get_homes(config, city, street):
+    if config.get("adapter") == "mapped_json_v1":
+        from mapped_provider import homes
+        document = await _read_json(config["site_url"])
+        return parse_homes(homes(document, config["mapping"], city, street))
     raw = await ajax_post(config, form_data(
         "getHomeNum",
         [("city", city), ("street", street)],
@@ -319,6 +338,11 @@ async def get_homes(config, city, street):
 
 
 async def get_schedule(config):
+    if config.get("adapter") == "mapped_json_v1":
+        from mapped_provider import schedule
+        document = await _read_json(config["ajax_url"])
+        preset, fact = schedule(document, config["mapping"])
+        return SimpleNamespace(preset=parse_preset(preset), fact=parse_fact(fact))
     raw = await ajax_post(config, {
         "method": "checkDisconUpdate",
         "update": "01.01.2000 00:00",
