@@ -3,7 +3,9 @@ import queue
 import threading
 import unittest
 
-from app import Application, normalize_roi, text_similar
+from app import (Application, normalize_roi, text_similar, crop_subtitle_area,
+                 is_nearly_black, parsed_ocr_words, subtitle_is_ready)
+import numpy as np
 
 
 class GeometryTests(unittest.TestCase):
@@ -42,6 +44,33 @@ class QueueTests(unittest.TestCase):
             a._submit_latest(q, i)
         self.assertEqual(q.qsize(), 1)
         self.assertEqual(q.get_nowait(), 2999)
+
+
+class PS5LiveSubtitleTests(unittest.TestCase):
+    def test_crop_1080p_live_frame(self):
+        frame = np.full((1080, 1920, 3), 90, dtype=np.uint8)
+        crop = crop_subtitle_area(frame, (0.1, 0.72, 0.9, 0.96))
+        self.assertEqual(crop.shape, (259, 1536, 3))
+        self.assertIsNone(crop_subtitle_area(frame, (0.5, 0.7, 0.5, 0.9)))
+
+    def test_hdmi_black_frame_detection(self):
+        self.assertTrue(is_nearly_black(np.zeros((720, 1280, 3), dtype=np.uint8)))
+        self.assertFalse(is_nearly_black(
+            np.full((720, 1280, 3), 110, dtype=np.uint8)))
+
+    def test_ocr_word_confidence(self):
+        text, confidence = parsed_ocr_words({
+            "text": ["", "Hello", "hero", "noise"],
+            "conf": ["-1", "92.5", "88.5", "3.2"],
+        })
+        self.assertEqual(text, "Hello hero")
+        self.assertEqual(confidence, 90.5)
+
+    def test_live_dialogue_low_latency(self):
+        self.assertTrue(subtitle_is_ready("Come back!", 90, 1, True))
+        self.assertFalse(subtitle_is_ready("Come back!", 90, 1, False))
+        self.assertTrue(subtitle_is_ready("Come back!", 54, 2, True))
+        self.assertFalse(subtitle_is_ready("...", 21, 1, True))
 
 
 if __name__ == "__main__":
