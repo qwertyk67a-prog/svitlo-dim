@@ -236,7 +236,7 @@ async def _request(config, form, *, cookies=None, csrf=None):
         "X-Requested-With": "XMLHttpRequest",
     }
     async with AsyncSession(
-        timeout=20, cookies=cookies or {}, headers=headers,
+        timeout=20, cookies=cookies or {}, headers=headers, allow_redirects=False,
         impersonate="chrome120",
     ) as session:
         token = csrf
