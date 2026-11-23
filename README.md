@@ -30,6 +30,9 @@ The labels dictionary maps each slot key to a time range covering part of
 the day. All ranges together must cover the whole day. Map each source status
 explicitly. Optional address paths sub_type, start_date, end_date and type
 supply outage details. Optional weekly selects a group/weekday/slots dictionary.
+Source links in Telegram use the site origin by default. Set public_site_url
+in POWER_CONFIG_JSON to show a specific public information page. The private
+request path and query are never reused as the default link.
 Both feeds must be accessible without authentication. Unsupported formats
 require another reader. Verify address and dry-run before changing delivery.
 

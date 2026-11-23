@@ -203,3 +203,26 @@ test("activation confirms private delivery once on a healthy installation", asyn
   assert.equal(messages[0].chat_id, cfg.WATCHDOG_TELEGRAM_CHAT_ID);
   assert.match(messages[0].text, /тестове особисте/);
 });
+
+test("independent watchdog works with dispatch disabled and missing PAT", async () => {
+  const original = globalThis.fetch, kv = storage();
+  const cfg = { ...env(kv), ENABLED: "false", GH_WORKFLOW_TOKEN: "" };
+  let alerts = 0;
+  globalThis.fetch = async (url, options) => {
+    if (url.includes("api.github.com")) {
+      assert.ok(!url.includes("/dispatches"));
+      assert.ok(!("Authorization" in options.headers));
+      return response(404);
+    }
+    alerts += 1;
+    return response(200, {ok: true});
+  };
+  try {
+    await worker.scheduled({}, cfg, {});
+    assert.equal(kv.state.status, "suspect");
+    await worker.scheduled({}, cfg, {});
+    assert.equal(alerts, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

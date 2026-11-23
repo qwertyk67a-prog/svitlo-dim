@@ -3,6 +3,9 @@
 Format adapter: form-encoded Yii-style 'getHomeNum' and 'checkDisconUpdate'.
 An installation can also select field-mapped JSON feeds.
 """
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import base64
 import logging
 import re
@@ -66,16 +69,28 @@ def parse_fact(raw):
     if not isinstance(raw_days, dict):
         raise RuntimeError("Incomplete provider daily fact")
     days = {}
+    stamps_by_date = {}
+    kyiv = ZoneInfo("Europe/Kyiv")
     for stamp, group_map in raw_days.items():
-        if isinstance(group_map, dict):
-            days[str(stamp)] = {
-                str(group): {
-                    str(slot): str(status)
-                    for slot, status in slots.items()
-                }
-                for group, slots in group_map.items()
-                if isinstance(slots, dict)
-            }
+        if not isinstance(group_map, dict):
+            raise RuntimeError("Invalid provider daily groups")
+        try:
+            day = datetime.fromtimestamp(int(stamp), kyiv).date()
+        except (TypeError, ValueError, OverflowError, OSError):
+            # once() reports a malformed timestamp while processing valid days.
+            key = str(stamp)
+        else:
+            key = stamps_by_date.setdefault(day, str(stamp))
+        groups = days.setdefault(key, {})
+        for group, slots in group_map.items():
+            values = ({str(slot): str(status) for slot, status in slots.items()}
+                      if isinstance(slots, dict) else {})
+            group = str(group)
+            # Conflicting records for one local day cannot prove cancellation.
+            if group in groups and groups[group] != values:
+                groups[group] = {}
+            else:
+                groups[group] = values
     return SimpleNamespace(days=days, update=raw.get("update"))
 
 

@@ -26,6 +26,7 @@ async function dispatchGitHub(env) {
       "/actions/workflows/check.yml/dispatches";
     const response = await fetch(url, {
       method: "POST",
+      signal: AbortSignal.timeout(15000),
       headers: {
         Authorization: "Bearer " + token,
         Accept: "application/vnd.github+json",
@@ -44,10 +45,6 @@ async function dispatchGitHub(env) {
 
 export default {
   async scheduled(_event, env, _ctx) {
-    if (env.ENABLED !== "true") {
-      console.log("Dispatch disabled");
-      return;
-    }
     let dispatchError = null;
     try {
       await dispatchGitHub(env);
