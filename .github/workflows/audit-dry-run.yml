@@ -11,6 +11,7 @@ on:
       - house_reliability.py
       - power_config.py
       - provider_transport.py
+      - mapped_provider.py
       - requirements.txt
       - constraints.txt
 permissions:

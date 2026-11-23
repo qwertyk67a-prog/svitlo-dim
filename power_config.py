@@ -54,7 +54,7 @@ def provider_config(*, required=True):
         raise ConfigurationError("Invalid POWER_CONFIG_JSON structure") from None
     if not isinstance(config, dict):
         raise ConfigurationError("Invalid POWER_CONFIG_JSON object")
-    if config.get("adapter") != "ajax_v1":
+    if config.get("adapter") not in ("ajax_v1", "mapped_json_v1"):
         raise ConfigurationError(
             "Unsupported provider adapter. A new adapter needs code and tests."
         )
@@ -87,7 +87,25 @@ def provider_config(*, required=True):
     for key in ("site_url", "ajax_url"):
         config[key] = _https_url(config.get(key), key)
     host = urlparse(config["site_url"]).hostname
-    if urlparse(config["ajax_url"]).hostname != host:
+    if config["adapter"] == "mapped_json_v1":
+        mapping = config.get("mapping")
+        if not isinstance(mapping, dict):
+            raise ConfigurationError("Missing provider mapping")
+        required = {"addresses", "city", "street", "house", "queues",
+                    "labels", "days", "date", "queue", "slots"}
+        optional = {"sub_type", "start_date", "end_date", "type", "weekly"}
+        for key in required | (optional & mapping.keys()):
+            path = mapping.get(key)
+            if (not isinstance(path, list) or len(path) > 16
+                    or not all(isinstance(item, str) and item for item in path)):
+                raise ConfigurationError("Invalid JSON field path")
+        statuses = mapping.get("statuses")
+        allowed = ("yes", "no", "maybe", "first", "second", "mfirst", "msecond")
+        if not isinstance(statuses, dict) or not statuses or any(
+            value not in allowed for value in statuses.values()
+        ):
+            raise ConfigurationError("Invalid provider status mapping")
+    elif urlparse(config["ajax_url"]).hostname != host:
         raise ConfigurationError("site_url and ajax_url hosts must match")
     if config.get("telegram_feed"):
         config["telegram_feed"] = _https_url(config["telegram_feed"], "telegram_feed")
