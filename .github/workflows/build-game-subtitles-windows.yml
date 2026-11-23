@@ -27,6 +27,7 @@ jobs:
           python -m pip install -r game-subtitles-ua/requirements.txt "pyinstaller>=6.10,<7"
           python -c "import cv2, numpy, PIL, pytesseract, edge_tts, pygame, mss, pygrabber, deep_translator, tkinter; print('Imports OK')"
           python -m py_compile game-subtitles-ua/app.py
+          python -m unittest discover -s game-subtitles-ua -p "test_*.py" -v
       - name: Install bundled OCR
         shell: pwsh
         run: |
