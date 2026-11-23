@@ -151,3 +151,12 @@ Both Telegram bots can have any username. Manual discovery accepts group
 commands. Delivery test mode accepts an explicit numeric private, group,
 supergroup or channel ID. Administrator delivery uses the private numeric
 chat ID in the Worker runtime Secrets.
+
+### Telegram schedule board
+
+The production check maintains one separate pinned schedule. Ordinary alerts
+remain in the chat history. Allow the bot to pin messages in the group.
+Resident messages are silent from 21:00 through 08:59 in Europe/Kyiv.
+Send /now in the configured chat, or privately as a verified group member.
+The regular monitoring job reads commands, so replies may take one polling
+cycle. Missing or incomplete source data are labelled on the saved schedule.

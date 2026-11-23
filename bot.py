@@ -587,6 +587,7 @@ def telegram_send(token, chat, text, deadline=None):
     Telegram sendMessage has no idempotency key. A network timeout after
     delivery can cause a duplicate on retry; we do not claim exactly once.
     """
+    from schedule_board import quiet
     for attempt in range(3):
         if deadline is not None and datetime.now(KYIV) >= deadline:
             raise RuntimeError("Термін нагадування минув; застаріле повідомлення не надсилається")
@@ -594,7 +595,8 @@ def telegram_send(token, chat, text, deadline=None):
             response = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 data={"chat_id": chat, "text": text, "parse_mode": "HTML",
-                      "disable_web_page_preview": "true"},
+                      "disable_web_page_preview": "true",
+                      "disable_notification": str(quiet(datetime.now(KYIV))).lower()},
                 timeout=20,
             )
         except requests.RequestException:
@@ -1063,6 +1065,31 @@ async def once():
     LOG.info("%s: %d; помилок доставки: %d",
              "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
              sent, len(problems))
+    if not dry_run and os.getenv("TELEGRAM_SCHEDULE_BOARD") == "true":
+        from functools import partial
+        from schedule_board import api, answer_commands, build_board, quiet, update_pin
+        call = partial(api, token)
+        def send_board(target, text):
+            result = call("sendMessage", chat_id=target, text=text, parse_mode="HTML",
+                          disable_notification=quiet(datetime.now(KYIV)))
+            return result["message_id"]
+
+        owner = token.partition(":")[0]
+        if state.get("board:owner") != owner:
+            for name in ("board:pin", "board:offset", "board:username"):
+                state.pop(name, None)
+            state["board:owner"] = owner
+        cache = state.setdefault("board:cache", {})
+        board = build_board(cache, source, house_groups, now, uncertain_gpv, house,
+                            "address_lookup" not in source_problems, parse_verified, compact_daily_message)
+        persist()
+        for action in (update_pin, answer_commands):
+            try:
+                action(state, board, chat, call, send_board, persist)
+            except RuntimeError as exc:
+                LOG.warning("Telegram %s: %s", action.__name__, exc)
+                if action is answer_commands:
+                    problems.append("now_commands")
     if problems:
         raise RuntimeError(f"Помилки Telegram: {len(problems)}; успішні події збережено")
     if source_problems:

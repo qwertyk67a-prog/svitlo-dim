@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - bot.py
+      - schedule_board.py
       - power_config.py
       - provider_transport.py
       - mapped_provider.py
