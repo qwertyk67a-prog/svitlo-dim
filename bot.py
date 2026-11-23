@@ -848,7 +848,12 @@ async def once():
                     continue
                 digest = fingerprint(payload)
                 old = state.get(key)
-                if state_digest(old) == digest:
+                certainty_changed = (
+                    kind == "day" and isinstance(old, dict) and state_status(old) == "outages"
+                    and bool(old.get("conditional")) != uncertain_gpv
+                    and any(mode == "off" for _, _, mode in upcoming_spans(parts[0], parts[1], now))
+                )
+                if state_digest(old) == digest and not certainty_changed:
                     continue
                 previous_status = state_status(old)
                 next_state = {
@@ -887,7 +892,7 @@ async def once():
                         if (day == today and old_spans is not None and
                                 upcoming_signature(day, old_spans, now) ==
                                 upcoming_signature(day, spans, now) and
-                                previous_status == "outages"):
+                                previous_status == "outages" and not certainty_changed):
                             state[key] = next_state
                             persist()
                             continue
@@ -962,6 +967,13 @@ async def once():
                         day, visible, group=group if len(groups) > 1 else None,
                         conditional=uncertain_gpv,
                     )
+                    if not visible and house is not None:
+                        from alerts import exact_provider_time
+                        start = exact_provider_time(house.start_date)
+                        end = exact_provider_time(house.end_date)
+                        if start and end and start <= now < end and day == today:
+                            end_format = "%H:%M" if end.date() == day else "%d.%m.%Y %H:%M"
+                            message += "\nЗа адресою вказано відключення до " + end.strftime(end_format)
                     enqueue(priority, key, next_state, message, "schedule")
                 elif message:
                     if house_groups is not None and len(house_groups) > 1:
@@ -979,6 +991,8 @@ async def once():
                     enqueue(priority, key, next_state, message, "schedule")
 
             # Exact lead-time reminders are independent of schedule-change notices.
+            if uncertain_gpv:
+                continue
             for key, message, deadline in due_reminders(
                     source, group, datetime.now(KYIV), leads, state, parse_verified):
                 enqueue(5, key, {"sent": True}, message, "reminder", deadline)

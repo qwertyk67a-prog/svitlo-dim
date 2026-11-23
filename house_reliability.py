@@ -110,8 +110,14 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     current = verified_house_queues(groups)
     previous = state.get("house:groups")
     has_previous = isinstance(previous, list) and bool(previous)
+    retired = False
     if has_previous:
-        previous = verified_house_queues(previous)
+        # A catalog change can leave opaque historical queue IDs in the checkpoint.
+        # Only today's provider assignment must pass current-catalog validation.
+        from power_config import provider_config
+        catalog = set(provider_config()["queue_catalog"])
+        retired = any(isinstance(group, str) and group not in catalog for group in previous)
+        previous = tuple(group for group in previous if isinstance(group, str) and group in catalog)
     else:
         # A fresh installation has no verified previous queue.
         # Never imply a change from a hard-coded or manually suggested queue.
@@ -122,7 +128,7 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     live = set(current)
     added = sorted(live - prior)
     removed = sorted(prior - live)
-    if not added and not removed:
+    if not added and not removed and not retired:
         return list(current), None
 
     title = (f"🔄 <b>{html.escape(operator_label())} оновив черги будинку</b>"
@@ -131,6 +137,8 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     if added:
         lines.append("➕ Додано: " + ", ".join(
             html.escape(queue_label(x)) for x in added))
+    if retired:
+        lines.append("Оператор вилучив попередню чергу з довідника.")
     if removed:
         label = "Вилучено" if has_previous else "Раніше відстежували"
         lines.append("➖ " + label + ": " + ", ".join(
