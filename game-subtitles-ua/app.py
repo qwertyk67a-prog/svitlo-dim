@@ -19,7 +19,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 from tkinter import filedialog, ttk, messagebox
 
-APP_TITLE = "Game Subtitles UA v0.4 — PS5 Live"
+APP_TITLE = "Game Subtitles UA v0.5 — FIFINE V3"
 LANGS = {"Английский": "eng", "Русский": "rus", "Английский + русский": "eng+rus",
          "Украинский": "ukr", "Японский": "jpn", "Немецкий": "deu",
          "Французский": "fra", "Испанский": "spa", "Польский": "pol"}
@@ -41,7 +41,12 @@ VOICE_MODES = (
 )
 
 SETTINGS_FILE = Path.home() / ".game_subtitles_ua.json"
-CAPTURE_PROFILES = ("Авто (1080p)", "720p / 30 FPS", "Без настройки")
+CAPTURE_PROFILES = (
+    "FIFINE V3 — 1080p / 60 FPS",
+    "Авто (1080p / 30 FPS)",
+    "720p / 30 FPS",
+    "Без настройки",
+)
 MAX_SUBTITLE_AGE_SECONDS = 6.0
 
 
@@ -57,12 +62,19 @@ def bundled_ocr():
     return None, None
 
 
+def is_fifine_card(name):
+    text = str(name).casefold()
+    return "fifine" in text or ("ampligame" in text and ("v3" in text or "capture" in text))
+
+
 def available_devices():
     try:
         from pygrabber.dshow_graph import FilterGraph
         names = FilterGraph().get_input_devices()
         if names:
-            return [(f"{name} (#{idx})", idx) for idx, name in enumerate(names)]
+            devices = [(f"{name} (#{idx})", idx) for idx, name in enumerate(names)]
+            # Reorder labels, NEVER reindex them: DShow indices must stay original.
+            return sorted(devices, key=lambda item: (not is_fifine_card(item[0]), item[1]))
     except Exception:
         pass
     return [(f"Видео #{idx}", idx) for idx in range(8)]
@@ -206,14 +218,14 @@ class Application:
         self.last_sent = ""
         self.last_ocr_at = 0.0
         self.ocr_confirmations = 0
-        self.devices = [("Видео #0", 0)]
+        self.devices = []
         self.monitors = [("Монитор 1", 1)]
         self.voices_by_lang = {key: list(value) for key, value in VOICE_DEFAULTS.items()}
         self.ps5_mode = tk.BooleanVar(value=self.config.get("ps5_mode", True))
         self.capture_profile = tk.StringVar(value=self.config.get("capture_profile", CAPTURE_PROFILES[0]))
         if self.capture_profile.get() not in CAPTURE_PROFILES:
             self.capture_profile.set(CAPTURE_PROFILES[0])
-        self.capture_info = tk.StringVar(value="PS5: HDMI → карта захвата → USB Windows")
+        self.capture_info = tk.StringVar(value="FIFINE V3: PS5 HDMI → HDMI IN; USB 3.0 → Windows; HDCP выключен")
         self.source = tk.StringVar(value=self.config.get("source", "Карта захвата"))
         if self.source.get() not in ("Экран Windows", "Карта захвата", "Видео-файл"):
             self.source.set("Экран Windows")
@@ -291,6 +303,8 @@ class Application:
                             values=CAPTURE_PROFILES, width=19)
         self.profile_box.pack(side="left")
         self.profile_box.bind("<<ComboboxSelected>>", self._profile_changed)
+        ttk.Label(section, text="FIFINE V3: максимум захвата 1080p/60; HDMI OUT можно подключить к ТВ.",
+                  foreground="#555555").pack(anchor="w", pady=(3, 0))
         ttk.Label(section, textvariable=self.capture_info,
                   foreground="#555555").pack(anchor="w", pady=(3, 0))
 
@@ -412,8 +426,9 @@ class Application:
         items = self.monitors if is_screen else self.devices
         old = self.device.get() if self.device_is_monitor == is_screen else ""
         labels = [name for name, idx in items]
+        preferred = next((name for name in labels if is_fifine_card(name)), None) if not is_screen else None
         self.device_box["values"] = labels
-        self.device.set(old if old in labels else (labels[0] if labels else ""))
+        self.device.set(old if old in labels else (preferred or (labels[0] if labels else "")))
         self.device_is_monitor = is_screen
 
     def _event(self, kind, data):
@@ -822,35 +837,75 @@ class Application:
             self._event("finished", session)
 
     def _open_ps5_card(self, index, profile):
-        # Cards advertise different combinations of DirectShow/MSMF, MJPEG
-        # and resolution. Only retain a backend after it returns a real frame.
-        plans = [(cv2.CAP_DSHOW, profile), (cv2.CAP_DSHOW, "Без настройки"),
-                 (cv2.CAP_MSMF, "Без настройки")]
-        for backend, selected in plans:
+        """Negotiate UVC capture. FIFINE V3 supports 1080p60 over USB 3.0.
+
+        Backends and pixel formats are tried in decreasing quality; card
+        selection does not depend on a fixed device index.
+        """
+        if profile == "FIFINE V3 — 1080p / 60 FPS":
+            candidates = [
+                (cv2.CAP_DSHOW, 1920, 1080, 60, "MJPG"),
+                (cv2.CAP_DSHOW, 1920, 1080, 60, "YUY2"),
+                (cv2.CAP_DSHOW, 1920, 1080, 30, "MJPG"),
+                (cv2.CAP_DSHOW, 1280, 720, 60, "MJPG"),
+                (cv2.CAP_MSMF, 1920, 1080, 60, "MJPG"),
+                (cv2.CAP_MSMF, 0, 0, 0, ""),
+            ]
+        elif profile == "720p / 30 FPS":
+            candidates = [
+                (cv2.CAP_DSHOW, 1280, 720, 30, "MJPG"),
+                (cv2.CAP_MSMF, 1280, 720, 30, "MJPG"),
+                (cv2.CAP_MSMF, 0, 0, 0, ""),
+            ]
+        elif profile == "Без настройки":
+            candidates = [
+                (cv2.CAP_DSHOW, 0, 0, 0, ""),
+                (cv2.CAP_MSMF, 0, 0, 0, ""),
+            ]
+        else:
+            candidates = [
+                (cv2.CAP_DSHOW, 1920, 1080, 30, "MJPG"),
+                (cv2.CAP_DSHOW, 1280, 720, 30, "MJPG"),
+                (cv2.CAP_MSMF, 0, 0, 0, ""),
+            ]
+        for backend, width, height, fps, fourcc in candidates:
             capture = None
+            if self.stop_event.is_set():
+                break
             try:
-                self._event("capture_info",
-                            f"Подключение PS5: {'DirectShow' if backend == cv2.CAP_DSHOW else 'Media Foundation'}"
-                            f" / {selected}")
+                backend_name = "DirectShow" if backend == cv2.CAP_DSHOW else "Media Foundation"
+                description = f"{width}×{height} {fps} FPS {fourcc}" if width else "без настройки"
+                self._event("capture_info", f"FIFINE: проверка {backend_name} / {description}")
                 capture = cv2.VideoCapture(index, backend)
                 if not capture.isOpened():
                     capture.release()
                     continue
-                if selected != "Без настройки":
-                    capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                    dimensions = (1280, 720) if selected == "720p / 30 FPS" else (1920, 1080)
-                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, dimensions[0])
-                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, dimensions[1])
-                    capture.set(cv2.CAP_PROP_FPS, 30)
+                if fourcc:
+                    capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+                if width and height:
+                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                if fps:
+                    capture.set(cv2.CAP_PROP_FPS, fps)
+                # Driver may ignore buffer size. Small buffers reduce dialogue lag.
+                capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 ok, frame = capture.read()
-                if ok and frame is not None:
+                if ok and frame is not None and frame.size:
+                    # Do not trust requested dimensions: report actual dimensions.
+                    actual_w = frame.shape[1]
+                    actual_h = frame.shape[0]
+                    actual_fps = capture.get(cv2.CAP_PROP_FPS)
+                    self._event("capture_info",
+                        f"FIFINE подключена: {actual_w}×{actual_h}; "
+                        f"драйвер сообщает {actual_fps:.0f} FPS; {backend_name}")
                     return capture
-            except Exception:
-                pass
+            except Exception as exc:
+                self._event("capture_info", f"Ошибка открытия FIFINE: {exc}")
             if capture is not None:
                 capture.release()
         raise RuntimeError(
-            "Карта захвата не отдаёт кадры. Проверьте HDMI IN, HDCP, USB и формат вывода PS5."
+            "Нет кадров FIFINE V3. Проверьте USB 3.0, HDMI IN, HDCP на PS5, "
+            "питание карты и что OBS/другие приложения не удерживают её."
         )
 
     def _ocr_worker(self):
