@@ -1,0 +1,55 @@
+name: Audit pinned dependencies
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/dependency-audit.yml'
+      - 'constraints.txt'
+      - 'requirements.txt'
+      - 'deploy/cloudflare-dispatcher/package*.json'
+  schedule:
+    - cron: '24 7 * * 1'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+      - name: Resolve production and test dependencies
+        run: python -m pip install --dry-run --ignore-installed --quiet --report /tmp/packages.json -r requirements.txt pytest PyYAML
+      - name: Check resolved Python versions in OSV
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          packages = [row["metadata"] for row in json.loads(Path("/tmp/packages.json").read_text())["install"]]
+          if not packages:
+              raise SystemExit("No packages resolved")
+          queries = [{"package": {"ecosystem": "PyPI", "name": p["name"]}, "version": p["version"]} for p in packages]
+          request = Request("https://api.osv.dev/v1/querybatch", data=json.dumps({"queries": queries}).encode(), headers={"Content-Type":"application/json"})
+          with urlopen(request, timeout=45) as response:
+              results = json.load(response)["results"]
+          if len(results) != len(packages):
+              raise SystemExit("Incomplete vulnerability response")
+          found = 0
+          for package, result in zip(packages, results):
+              for item in result.get("vulns", []):
+                  print(package["name"], package["version"], item["id"])
+                  found += 1
+              if result.get("next_page_token"):
+                  raise SystemExit("Additional findings are available")
+          print(f"Checked {len(packages)} resolved Python packages; advisory matches: {found}")
+          raise SystemExit(bool(found))
+          PY
+      - name: Audit locked Worker build dependencies
+        if: always()
+        working-directory: deploy/cloudflare-dispatcher
+        run: npm audit --package-lock-only --audit-level=low
