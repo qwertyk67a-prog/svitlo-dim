@@ -607,6 +607,10 @@ def telegram_send(token, chat, text, deadline=None):
             raise RuntimeError(f"Некоректна відповідь Telegram HTTP {response.status_code}") from None
         if response.status_code == 200 and body.get("ok") is True:
             return body.get("result", {}).get("message_id")
+        migrated = (body.get("parameters") or {}).get("migrate_to_chat_id")
+        if response.status_code == 400 and isinstance(migrated, int) and migrated < 0 and str(migrated) != str(chat):
+            chat = migrated
+            continue
         if response.status_code == 429:
             delay = (body.get("parameters") or {}).get("retry_after", 1)
             try:
@@ -679,6 +683,8 @@ async def once():
     identity = checkpoint_namespace(config, token, chat)
     if state.get("config:namespace") != identity:
         state = {"config:namespace": identity}
+
+    chat = state.get("board:migrated_chat") or chat
 
     def persist():
         """Never mutate a real notification checkpoint during a dry run."""
@@ -1066,9 +1072,24 @@ async def once():
              "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
              sent, len(problems))
     if not dry_run and os.getenv("TELEGRAM_SCHEDULE_BOARD") == "true":
-        from functools import partial
-        from schedule_board import api, answer_commands, build_board, quiet, update_pin
-        call = partial(api, token)
+        from schedule_board import APIError, api, answer_commands, build_board, quiet, update_pin
+        configured_chat = str(chat)
+        def call(method, **params):
+            nonlocal chat
+            group_request = str(params.get("chat_id")) in (configured_chat, str(chat))
+            if group_request:
+                params["chat_id"] = chat
+            try:
+                return api(token, method, **params)
+            except APIError as exc:
+                if not (group_request and exc.code == 400 and isinstance(exc.migrated, int) and exc.migrated < 0 and str(exc.migrated) != str(chat)):
+                    raise
+                chat = str(exc.migrated)
+                state["board:migrated_chat"] = chat
+                persist()
+                LOG.info("Telegram migration confirmed")
+                params["chat_id"] = chat
+                return api(token, method, **params)
         def send_board(target, text):
             result = call("sendMessage", chat_id=target, text=text, parse_mode="HTML",
                           disable_notification=quiet(datetime.now(KYIV)))

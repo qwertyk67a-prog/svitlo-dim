@@ -16,8 +16,9 @@ def quiet(now):
 
 
 class APIError(RuntimeError):
-    def __init__(self, method, code, description):
+    def __init__(self, method, code, description, migrated=None):
         super().__init__(f"{method} HTTP {code}")
+        self.migrated = migrated
         self.code = code
         self.description = description.lower()
 
@@ -30,7 +31,13 @@ def api(token, method, **params):
     except (requests.RequestException, ValueError):
         raise RuntimeError(f"{method} unavailable") from None
     if not isinstance(body, dict) or not body.get("ok"):
-        raise APIError(method, response.status_code, str(body.get("description", "")) if isinstance(body, dict) else "")
+        error = body if isinstance(body, dict) else {}
+        description = str(error.get("description", ""))
+        for reason in ("chat not found", "not enough rights", "upgraded to a supergroup", "can't parse entities", "message thread not found", "group chat was deactivated", "message is too long"):
+            if reason in description.lower():
+                LOG.warning("Telegram %s: %s", method, reason)
+                break
+        raise APIError(method, response.status_code, description, (error.get("parameters") or {}).get("migrate_to_chat_id"))
     return body["result"]
 
 
@@ -97,12 +104,6 @@ def update_pin(state, text, chat, call, send, persist):
         owner = str(top.get("from", {}).get("id"))
         if owner == state.get("board:owner") and re.match(r"^\d{2}\.\d{2}\.\d{4}[^\n]*\n(?:Відключення|Можливі відключення)", previous):
             pin["previous"] = top["message_id"]
-    if not state.get("board:resend_checked"):
-        old = pin.get("id")
-        if old and (pin.get("pinned") or top.get("message_id") == old):
-            pin["previous"] = old
-        pin.pop("id", None)
-        state["board:resend_checked"] = True
     if pin.get("id") and not top:
         pin["pinned"] = False
     if pin.get("id") and pin.get("digest") != digest:
