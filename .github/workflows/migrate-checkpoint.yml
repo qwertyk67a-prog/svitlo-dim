@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require reviewed feature branch
+      - name: Require production branch
         env:
           CHECKED_OUT_REF: ${{ github.ref }}
         run: |
-          if [[ "$CHECKED_OUT_REF" != "refs/heads/feature/provider-independent-template-20261120" ]]; then
-            echo "::error::Select reviewed feature branch, not main"
+          if [[ "$CHECKED_OUT_REF" != "refs/heads/main" ]]; then
+            echo "::error::Select the production main branch"
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -32,10 +32,7 @@ jobs:
       - name: Migrate old state into isolated branch
         env:
           BOT_ENABLED: ${{ secrets.BOT_ENABLED || vars.BOT_ENABLED }}
-          # The one-time push trigger is created only after the owner
-          # explicitly disables BOT_ENABLED. The script independently checks
-          # that variable and refuses a nonempty target branch.
-          CONFIRM_MIGRATION: ${{ github.event_name == 'push' && 'MIGRATE' || inputs.confirmation }}
+          CONFIRM_MIGRATION: ${{ inputs.confirmation }}
           REPOSITORY_STATE_TOKEN: ${{ github.token }}
           REPOSITORY_STATE_BRANCH: bot-state
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
