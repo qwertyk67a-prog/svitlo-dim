@@ -214,3 +214,11 @@ def test_multiword_street_and_compound_house_are_matched_in_full():
     assert coverage_for_house(msg + "42А/1", scope)["level"] == "house"
     for other in ("42/1", "42Б/1", "42А/11"):
         assert not covers_house(msg + other, scope)
+
+
+def test_plain_house_does_not_match_detached_building_letter():
+    scope = {**FULL, "house": "42"}
+    message = "Зелений Бір: знеструмлено вул. Умовна, буд. "
+    for suffix in (" А", " Б/1"):
+        assert not covers_house(message + "42" + suffix, scope)
+    assert covers_house(message + "42 і 44", scope)
