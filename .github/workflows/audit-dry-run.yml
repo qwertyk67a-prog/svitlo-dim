@@ -7,6 +7,7 @@ on:
       - .github/workflows/audit-dry-run.yml
       - alerts.py
       - bot.py
+      - schedule_board.py
       - event_scope.py
       - house_reliability.py
       - power_config.py

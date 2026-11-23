@@ -74,6 +74,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_SCHEDULE_BOARD: "true"
           REMINDER_MINUTES: ${{ secrets.REMINDER_MINUTES || vars.REMINDER_MINUTES || '0' }}
           ANNOUNCEMENTS_ENABLED: ${{ secrets.ANNOUNCEMENTS_ENABLED || vars.ANNOUNCEMENTS_ENABLED || 'true' }}
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
