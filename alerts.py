@@ -611,6 +611,10 @@ def address_event(entry):
     outage_type = str(entry.outage_type or "")
     if not (reason or beginning or ending):
         return None
+    start_time = exact_provider_time(beginning)
+    end_time = exact_provider_time(ending)
+    if start_time and end_time and end_time < start_time:
+        raise ValueError("Invalid address outage interval")
     description = reason.casefold()
     if "авар" in description or "пошкодж" in description:
         category = "fault"

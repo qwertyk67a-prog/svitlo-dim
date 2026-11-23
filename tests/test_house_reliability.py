@@ -831,3 +831,57 @@ def test_address_and_schedule_share_only_equivalent_visible_intervals(tmp_path, 
     asyncio.run(bot.once())
     assert sent[-1] == "19.11.2026\nВідключення:\n20:22–23:30"
     assert len(sent) == 2
+
+
+def test_status_changes_without_slot_changes_update_delivered_message(tmp_path, monkeypatch):
+    path, _, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes","2":"yes","3":"no"})
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", True)
+    asyncio.run(bot.once())
+    for status in ("active", "closed"):
+        state = bot.state_read(path)
+        state["official:status:emergency:region"] = {"status": status}
+        bot.state_write(path, state)
+        asyncio.run(bot.once())
+        asyncio.run(bot.once())
+    assert [msg.splitlines()[1] for msg in sent] == [
+        "Відключення:", "Можливі відключення:", "Відключення:"]
+
+
+def test_retired_queue_in_checkpoint_cannot_block_new_assignment():
+    from house_reliability import house_queue_transition
+    old = "Q" + "a" * 24
+    queues, message = house_queue_transition({"house:groups": [old]}, ("GPV3.1",))
+    assert queues == ["GPV3.1"]
+    assert "вилучив" in message and old not in message
+    assert house_queue_transition({"house:groups": queues}, tuple(queues))[1] is None
+
+
+def test_reversed_address_interval_does_not_replace_active_notice():
+    from alerts import address_decision
+    entry = address_entry(["GPV3.1"])
+    entry.start_date = "23.11.2026 18:00"
+    entry.end_date = "23.11.2026 16:00"
+    state = {"address:last_outage": {"status": "active", "end": "23.11.2026 19:00"}}
+    with pytest.raises(ValueError, match="Invalid address outage interval"):
+        address_decision(entry, state, datetime(2026,11,23,17,tzinfo=KYIV))
+    assert state["address:last_outage"]["status"] == "active"
+
+
+def test_schedule_cancellation_keeps_confirmed_address_outage_visible(tmp_path, monkeypatch):
+    import alerts
+    _, current, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes","2":"yes","3":"no"})
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", True)
+    entry = address_entry(["GPV3.1"])
+    entry.start_date = "19.11.2026 20:10"
+    entry.end_date = "19.11.2026 23:30"
+
+    async def home(_secret):
+        return entry
+
+    monkeypatch.setattr(alerts, "fetch_address_status", home)
+    asyncio.run(bot.once())
+    current["source"]["3"] = "yes"
+    asyncio.run(bot.once())
+    assert sent[-1].splitlines() == [
+        "19.11.2026", "Відключення за графіком скасовано",
+        "За адресою вказано відключення до 23:30"]
