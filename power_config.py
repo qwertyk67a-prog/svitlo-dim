@@ -86,7 +86,12 @@ def provider_config(*, required=True):
     config["queue_display_prefix"] = prefix
     for key in ("site_url", "ajax_url"):
         config[key] = _https_url(config.get(key), key)
-    host = urlparse(config["site_url"]).hostname
+    source = urlparse(config["site_url"])
+    if "public_site_url" in config:
+        config["public_site_url"] = _https_url(config["public_site_url"], "public_site_url")
+    else:
+        config["public_site_url"] = f"{source.scheme}://{source.netloc}"
+    host = source.hostname
     if config["adapter"] == "mapped_json_v1":
         mapping = config.get("mapping")
         if not isinstance(mapping, dict):
@@ -150,7 +155,7 @@ def operator_label():
 
 
 def official_site():
-    return provider_config(required=False).get("site_url", "")
+    return provider_config(required=False).get("public_site_url", "")
 
 
 def source_tag():

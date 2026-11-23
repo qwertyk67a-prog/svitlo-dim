@@ -465,3 +465,27 @@ def test_address_config_without_operator_telegram(monkeypatch):
     monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config))
     assert provider_config()["telegram_feed"] == ""
     assert json.loads(address_json()) == TEST_CONFIG["address"]
+
+
+def test_same_local_date_conflicts_never_erase_a_published_outage():
+    raw = {"data": {
+        "1900000000": {"A": {"1": "no"}, "B": {"1": "yes"}},
+        "1900000001": {"A": {"1": "yes"}, "C": {"1": "no"}},
+        "1900000002": {"A": {"1": "yes"}, "B": {"1": "yes"}},
+    }}
+    assert parse_fact(raw).days == {
+        "1900000000": {"A": {}, "B": {"1": "yes"}, "C": {"1": "no"}}}
+    with pytest.raises(RuntimeError):
+        parse_fact({"data": {"1900000000": "broken"}})
+    assert parse_fact({"data": {"1900000000": {"B": None}}}).days == {
+        "1900000000": {"B": {}}}
+
+
+def test_source_link_never_exposes_private_request_path_or_query(monkeypatch):
+    from power_config import official_site
+    config = {**TEST_CONFIG, "site_url": "https://grid.example.invalid/house/42?unit=7"}
+    monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config))
+    assert official_site() == "https://grid.example.invalid"
+    config["public_site_url"] = "https://grid.example.invalid/news"
+    monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config))
+    assert official_site() == config["public_site_url"]

@@ -40,12 +40,13 @@ async function githubHealthy(repository, token, fetchFn, nowMs) {
   let response;
   try {
     response = await fetchFn(url, {
-      headers: { ...standardHeaders, Authorization: "Bearer " + token },
+      headers: token ? { ...standardHeaders, Authorization: "Bearer " + token } : standardHeaders,
+      signal: AbortSignal.timeout(15000),
     });
-    if (response.status === 401 || response.status === 403) {
+    if (token && (response.status === 401 || response.status === 403)) {
       // Public repository history remains readable if the dispatch PAT
       // expires or is revoked. Do not use it for Telegram requests.
-      response = await fetchFn(url, { headers: standardHeaders });
+      response = await fetchFn(url, { headers: standardHeaders, signal: AbortSignal.timeout(15000) });
     }
     if (!response.ok) return false;
     const value = await response.json();
@@ -67,6 +68,7 @@ async function sendTelegram(env, text, fetchFn) {
   const url = "https://api.telegram.org/bot" + token + "/sendMessage";
   const response = await fetchFn(url, {
     method: "POST",
+    signal: AbortSignal.timeout(15000),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       chat_id: chat,
@@ -89,7 +91,7 @@ function record(status, sinceMs, lastAlertMs = 0) {
 export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now()) {
   if (env.WATCHDOG_ENABLED !== "true") return "disabled";
   const repository = verifyRepository(env.TARGET_REPOSITORY);
-  if (!env.WATCHDOG_KV || !env.GH_WORKFLOW_TOKEN ||
+  if (!env.WATCHDOG_KV ||
       !env.WATCHDOG_TELEGRAM_BOT_TOKEN || !env.WATCHDOG_TELEGRAM_CHAT_ID) {
     throw new Error("Watchdog is enabled without required KV or Secrets");
   }
