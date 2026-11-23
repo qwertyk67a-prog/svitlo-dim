@@ -25,3 +25,9 @@ jobs:
           WORKER_INSTALLATION_JSON: >-
             {"worker":"synthetic-worker","namespace":"00000000000000000000000000000001","repository":"${{ github.repository }}"}
         run: node deploy/cloudflare-dispatcher/deploy.mjs --dry-run
+
+      - name: Resolve exact build dependencies for review
+        working-directory: deploy/cloudflare-dispatcher
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit
+          python -c "import gzip,base64,pathlib; print('LOCK_PAYLOAD='+base64.b64encode(gzip.compress(pathlib.Path('package-lock.json').read_bytes())).decode())"
