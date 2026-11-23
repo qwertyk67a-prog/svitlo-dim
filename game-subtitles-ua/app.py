@@ -904,6 +904,15 @@ class Application:
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except (OSError, AttributeError):
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except (OSError, AttributeError):
+                pass
     root = tk.Tk()
     try:
         ttk.Style().theme_use("vista")
