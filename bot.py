@@ -39,8 +39,74 @@ def compact_daily_message(day, spans, *, group=None, conditional=False):
         times = [f"{clock(a)}–{clock(b)}" for a, b, status in spans
                  if conditional or status == mode]
         if times:
-            lines.append(label + ": " + ", ".join(times))
+            lines.extend([label + ":", *times])
     return "\n".join(lines)
+
+
+def address_window(record):
+    from alerts import exact_provider_time
+    if not isinstance(record, dict) or record.get("status") != "active":
+        return None, None
+    return exact_provider_time(record.get("start")), exact_provider_time(record.get("end"))
+
+
+def same_remaining_window(first, second, now):
+    start, end = first
+    other_start, other_end = second
+    return bool(start and other_start and end and end == other_end and end > now
+                and max(start, now) == max(other_start, now))
+
+
+def address_already_announced(value, old, state, groups, now, conditional):
+    window = address_window(value)
+    start, end = window
+    old_start, old_end = address_window(old)
+    if same_remaining_window(window, (old_start, old_end), now):
+        return True
+    if (start and old_start and not end and not old_end
+            and value.get("end") == old.get("end") and max(start, now) == max(old_start, now)):
+        return True
+    if not start or not end or end <= now or not groups or conditional:
+        return False
+    if old_end and old_end > now and (old_start or old_end != end):
+        return False
+    day = max(start, now).date()
+    midnight = datetime.combine(day, datetime.min.time(), KYIV)
+    for group in groups:
+        published = state.get(f"{day.isoformat()}:{group}") or {}
+        if not isinstance(published, dict) or published.get("status") != "outages" or published.get("conditional"):
+            return False
+        if not any(mode == "off" and same_remaining_window(window, (
+            midnight + timedelta(minutes=a), midnight + timedelta(minutes=b)), now)
+                   for a, b, mode in published.get("spans", ())):
+            return False
+    return True
+
+
+def compact_address_message(value, now):
+    from alerts import parse_provider_date
+    if value["status"] == "expired":
+        return (now.strftime("%d.%m.%Y") + "\nОновлено час завершення:\n"
+                + html.escape(value["end"]))
+    start, end = address_window(value)
+    day = start or parse_provider_date(value.get("start")) or end or now
+
+    def display(raw, instant):
+        if instant:
+            return instant.strftime("%H:%M" if instant.date() == day.date() else "%d.%m.%Y %H:%M")
+        return html.escape(str(raw or ""))
+
+    beginning = display(value.get("start"), start)
+    finish = display(value.get("end"), end)
+    if beginning and finish:
+        detail = beginning + "–" + finish
+    elif finish:
+        detail = "До " + finish
+    elif beginning:
+        detail = "З " + beginning + ", час завершення невідомий"
+    else:
+        detail = "Час не вказано"
+    return day.strftime("%d.%m.%Y") + "\nВідключення:\n" + detail
 
 
 def time_range(label):
@@ -723,7 +789,7 @@ async def once():
                 if key == "address:groups":
                     # Only house_queue_transition owns this state key.
                     continue
-                enqueue(1, key, value, message, "address")
+                enqueue(4 if COMPACT_DAILY_SCHEDULE else 1, key, value, message, "address")
         except Exception as exc:
             LOG.warning("Адресні події недоступні: %s", type(exc).__name__)
             source_problems.append("address_events")
@@ -797,6 +863,7 @@ async def once():
                     new_visible = upcoming_spans(day, spans, now)
                     old_visible = upcoming_spans(day, old_spans, now)
                     next_state["spans"] = [list(span) for span in spans]
+                    next_state["conditional"] = uncertain_gpv
 
                     # provider only published already-ended slots for today:
                     # do not announce an incident that is over.
@@ -881,6 +948,16 @@ async def once():
                     continue
                 if COMPACT_DAILY_SCHEDULE and kind in ("day", "day_cancel"):
                     visible = new_visible if next_state["status"] == "outages" else []
+                    if (kind == "day" and not uncertain_gpv and len(groups) == 1
+                            and previous_status not in ("outages", "cancelled")
+                            and len(visible) == 1 and visible[0][2] == "off"):
+                        start, end, _mode = visible[0]
+                        midnight = datetime.combine(day, datetime.min.time(), KYIV)
+                        interval = (midnight + timedelta(minutes=start), midnight + timedelta(minutes=end))
+                        if same_remaining_window(interval, address_window(state.get("address:last_outage")), now):
+                            state[key] = next_state
+                            persist()
+                            continue
                     message = compact_daily_message(
                         day, visible, group=group if len(groups) > 1 else None,
                         conditional=uncertain_gpv,
@@ -908,7 +985,8 @@ async def once():
 
     # Preserve order among official announcements (e.g. start then cancel).
     # A failed send must not advance the official feed checkpoint.
-    pending.sort(key=lambda item: (item[0], item[1]))
+    pending.sort(key=lambda item: (item[0], item[5] == "address", item[1]))
+    delivered_schedule_keys = set()
     official_failed = False
     last_send = 0.0
     for _priority, _seq, key, value, message, origin, deadline, cursor in pending:
@@ -918,6 +996,16 @@ async def once():
             state[key] = value
             persist()
             continue
+        if COMPACT_DAILY_SCHEDULE and origin == "address" and key == "address:last_outage" and message:
+            start, _end = address_window(value)
+            date_key = max(start, now).date().isoformat() if start else ""
+            same_run = bool(house_groups) and all(
+                f"{date_key}:{group}" in delivered_schedule_keys for group in house_groups)
+            old = None if same_run else state.get(key)
+            if address_already_announced(value, old, state, house_groups, now, uncertain_gpv):
+                message = None
+            else:
+                message = compact_address_message(value, now)
         if not message:
             state[key] = value
             persist()
@@ -943,6 +1031,8 @@ async def once():
             LOG.error("Помилка доставки (%s): %s", origin, type(exc).__name__)
             problems.append(origin)
             continue
+        if origin == "schedule":
+            delivered_schedule_keys.add(key)
         last_send = time.monotonic()
         if origin == "official":
             state["official:last_id"] = max(

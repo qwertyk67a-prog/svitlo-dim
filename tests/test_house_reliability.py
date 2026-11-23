@@ -721,9 +721,9 @@ def test_compact_daily_new_cancel_resumed_and_unchanged(tmp_path, monkeypatch):
     asyncio.run(bot.once())
     asyncio.run(bot.once())
     assert sent == [
-        "19.11.2026\nВідключення: 20:00–24:00",
+        "19.11.2026\nВідключення:\n20:00–24:00",
         "19.11.2026\nВідключення за графіком скасовано",
-        "19.11.2026\nВідключення: 20:00–24:00",
+        "19.11.2026\nВідключення:\n20:00–24:00",
     ]
 
 
@@ -731,9 +731,9 @@ def test_compact_daily_preserves_uncertainty_and_queue():
     day = datetime(2026, 11, 23).date()
     spans = [(60,120,"off"), (180,240,"maybe")]
     text = bot.compact_daily_message(day, spans, group="GPV3.1")
-    assert text == "23.11.2026 · Черга 3.1\nВідключення: 01:00–02:00\nМожливі відключення: 03:00–04:00"
+    assert text == "23.11.2026 · Черга 3.1\nВідключення:\n01:00–02:00\nМожливі відключення:\n03:00–04:00"
     assert bot.compact_daily_message(day, spans, conditional=True) == (
-        "23.11.2026\nМожливі відключення: 01:00–02:00, 03:00–04:00")
+        "23.11.2026\nМожливі відключення:\n01:00–02:00\n03:00–04:00")
 
 
 @pytest.mark.parametrize("kind", ["week", "week_cancel"])
@@ -787,3 +787,47 @@ def test_two_installations_route_only_to_their_own_chat(tmp_path, monkeypatch):
         asyncio.run(bot.once())
         asyncio.run(bot.once())
     assert deliveries == [("test-token-1","-100001"), ("test-token-2","-100002")]
+
+
+@pytest.mark.parametrize("hour,minute,old_start,new_start,end", [
+    (5, 21, 240, "04:20", 480), (16, 36, 870, "14:45", 1110),
+])
+def test_address_update_with_only_a_past_start_change(hour, minute, old_start, new_start, end):
+    now = datetime(2026, 11, 23, hour, minute, tzinfo=KYIV)
+    published = {"2026-11-23:Q": {"status": "outages", "spans": [(old_start, end, "off")]}}
+    report = {"status": "active", "start": new_start + " 23.11.2026",
+              "end": bot.clock(end) + " 23.11.2026"}
+    assert bot.address_already_announced(report, None, published, ["Q"], now, False)
+    assert not bot.address_already_announced(report, None, {}, ["Q"], now, False)
+    assert not bot.address_already_announced(report, None, published, ["Q", "Q2"], now, False)
+    assert not bot.address_already_announced(report, None, published, ["Q"], now, True)
+
+
+@pytest.mark.parametrize("schedule_first", [True, False])
+def test_address_and_schedule_share_only_equivalent_visible_intervals(tmp_path, monkeypatch, schedule_first):
+    import alerts
+    path, current, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes","2":"yes","3":"yes"})
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", True)
+    entry = address_entry(["GPV3.1"])
+
+    async def home(_secret):
+        return entry
+
+    monkeypatch.setattr(alerts, "fetch_address_status", home)
+    if schedule_first:
+        current["source"]["3"] = "no"
+        asyncio.run(bot.once())
+    entry.start_date = "19.11.2026 20:15"
+    entry.end_date = "20.11.2026 00:00"
+    asyncio.run(bot.once())
+    current["source"]["3"] = "no"
+    asyncio.run(bot.once())
+    assert len(sent) == 1
+    assert sent[0].startswith("19.11.2026\nВідключення:\n")
+    entry.start_date = "19.11.2026 20:22"
+    asyncio.run(bot.once())
+    assert len(sent) == 1
+    entry.end_date = "19.11.2026 23:30"
+    asyncio.run(bot.once())
+    assert sent[-1] == "19.11.2026\nВідключення:\n20:22–23:30"
+    assert len(sent) == 2
