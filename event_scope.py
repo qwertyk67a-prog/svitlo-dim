@@ -94,6 +94,9 @@ def _exact_house(text, scope):
     if subnumber:
         number_regex += rf"\s*/\s*{re.escape(subnumber)}"
     number_regex += r"(?![\w/]|\s*/\s*[\w]|[.\-][\w])"
+    # A detached building letter also identifies a different building.
+    # Keep the Ukrainian conjunction in address lists such as "42 і 44".
+    number_regex += r"(?!\s+[а-яіїєґa-z](?=\s*(?:$|[/,;:.!?)])))"
     return bool(re.search(
         rf"\b{street}\b[\s,;:№#.\-/\\]*(?:буд(?:инок)?\.?\s*№?\s*)?"
         rf"[\s,;:№#.\-/\\]{{0,18}}{number_regex}", text
