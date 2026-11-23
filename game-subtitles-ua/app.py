@@ -1,4 +1,4 @@
-"""Game Subtitles UA — screen, USB capture and video subtitle translation with Ukrainian speech."""
+"""Game Subtitles UA — Windows OCR with Ukrainian/Russian dual-voice speech."""
 from __future__ import annotations
 
 import asyncio
@@ -23,8 +23,23 @@ APP_TITLE = "Game Subtitles UA"
 LANGS = {"Английский": "eng", "Русский": "rus", "Английский + русский": "eng+rus",
          "Украинский": "ukr", "Японский": "jpn", "Немецкий": "deu",
          "Французский": "fra", "Испанский": "spa", "Польский": "pol"}
-FALLBACK_VOICES = [("Polina (женский)", "uk-UA-PolinaNeural"),
-                   ("Ostap (мужской)", "uk-UA-OstapNeural")]
+VOICE_DEFAULTS = {
+    "uk": [
+        ("Polina — женский", "uk-UA-PolinaNeural", "Female"),
+        ("Ostap — мужской", "uk-UA-OstapNeural", "Male"),
+    ],
+    "ru": [
+        ("Svetlana — женский", "ru-RU-SvetlanaNeural", "Female"),
+        ("Dmitry — мужской", "ru-RU-DmitryNeural", "Male"),
+    ],
+}
+VOICE_MODES = (
+    "Оба одновременно",
+    "По очереди",
+    "Только женский",
+    "Только мужской",
+)
+
 SETTINGS_FILE = Path.home() / ".game_subtitles_ua.json"
 
 
@@ -60,8 +75,8 @@ class Application:
     def __init__(self, root):
         self.root = root
         root.title(APP_TITLE)
-        root.geometry("1000x800")
-        root.minsize(770, 650)
+        root.geometry("1000x850")
+        root.minsize(850, 690)
         try:
             self.config = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -71,6 +86,9 @@ class Application:
         self.translate_jobs = queue.Queue(maxsize=1)
         self.speech_jobs = queue.Queue(maxsize=1)
         self.speech_serial = 0
+        self.capture_serial = 0
+        self.voice_turn = 0
+        self.closing = False
         self.roi = self.config.get("roi", [0.08, 0.68, 0.92, 0.94])
         self.frame = None
         self.image = None
@@ -82,12 +100,26 @@ class Application:
         self.last_ocr_at = 0.0
         self.ocr_confirmations = 0
         self.devices = [("Видео #0", 0)]
-        self.voices = list(FALLBACK_VOICES)
+        self.voices_by_lang = {key: list(value) for key, value in VOICE_DEFAULTS.items()}
         self.source = tk.StringVar(value=self.config.get("source", "Карта захвата"))
         self.device = tk.StringVar(value="Видео #0")
         self.file = tk.StringVar(value="")
         self.language = tk.StringVar(value=self.config.get("language", "Английский"))
-        self.voice = tk.StringVar(value=self.config.get("voice", FALLBACK_VOICES[0][0]))
+        self.output_language = tk.StringVar(value=self.config.get("output_language", "Украинский"))
+        if self.output_language.get() not in ("Украинский", "Русский"):
+            self.output_language.set("Украинский")
+        self.target_code = "ru" if self.output_language.get() == "Русский" else "uk"
+        self.voice_mode = tk.StringVar(value=self.config.get("voice_mode", "Оба одновременно"))
+        if self.voice_mode.get() not in VOICE_MODES:
+            self.voice_mode.set("Оба одновременно")
+        self.voice_female = tk.StringVar()
+        self.voice_male = tk.StringVar()
+        self.selected_voices = {}
+        for code, defaults in VOICE_DEFAULTS.items():
+            self.selected_voices[code] = {
+                "Female": self.config.get(f"female_{code}", defaults[0][1]),
+                "Male": self.config.get(f"male_{code}", defaults[1][1]),
+            }
         self.speed = tk.IntVar(value=self.config.get("speed", 0))
         self.volume = tk.IntVar(value=self.config.get("volume", 90))
         self.subtitle = tk.StringVar(value="—")
@@ -105,7 +137,7 @@ class Application:
     def _ui(self):
         pane = ttk.Frame(self.root, padding=12)
         pane.pack(fill="both", expand=True)
-        ttk.Label(pane, text="Игровые субтитры → украинский перевод и озвучка",
+        ttk.Label(pane, text="Игровые субтитры → перевод и озвучка на украинском или русском",
                   font=("Segoe UI", 15, "bold")).pack(anchor="w", pady=(0, 10))
 
         section = ttk.LabelFrame(pane, text="1. Источник изображения", padding=8)
@@ -129,25 +161,50 @@ class Application:
         ttk.Combobox(second, textvariable=self.language, values=list(LANGS),
                      state="readonly", width=21).pack(side="left")
 
-        voice_section = ttk.LabelFrame(pane, text="2. Украинская озвучка", padding=8)
+        voice_section = ttk.LabelFrame(pane, text="2. Перевод и озвучка", padding=8)
         voice_section.pack(fill="x", pady=(10, 0))
         first = ttk.Frame(voice_section)
-        first.pack(fill="x")
-        ttk.Label(first, text="Голос:").pack(side="left")
-        self.voice_box = ttk.Combobox(first, textvariable=self.voice, width=34, state="readonly")
-        self.voice_box.pack(side="left", padx=6)
-        self.voice_box["values"] = [v[0] for v in self.voices]
-        ttk.Button(first, text="Обновить голоса", command=lambda: threading.Thread(
-            target=self._scan_voices, daemon=True).start()).pack(side="left")
-        ttk.Button(first, text="Прослушать", command=self._test_voice).pack(side="left", padx=5)
-        ttk.Button(first, text="Остановить речь", command=self._stop_speech).pack(side="left")
+        first.pack(fill="x", pady=(0, 6))
+        ttk.Label(first, text="Язык перевода:").pack(side="left")
+        out_box = ttk.Combobox(first, textvariable=self.output_language,
+                               values=["Украинский", "Русский"], state="readonly", width=16)
+        out_box.pack(side="left", padx=(6, 18))
+        out_box.bind("<<ComboboxSelected>>", self._output_language_changed)
+        ttk.Label(first, text="Режим голосов:").pack(side="left")
+        ttk.Combobox(first, textvariable=self.voice_mode, values=VOICE_MODES,
+                     state="readonly", width=23).pack(side="left", padx=6)
+
         second = ttk.Frame(voice_section)
-        second.pack(fill="x", pady=(10, 3))
-        ttk.Label(second, text="Скорость:").pack(side="left")
-        ttk.Scale(second, from_=-40, to=60, variable=self.speed,
+        second.pack(fill="x", pady=(2, 5))
+        ttk.Label(second, text="Женский:").pack(side="left")
+        self.female_box = ttk.Combobox(second, textvariable=self.voice_female,
+                                       state="readonly", width=30)
+        self.female_box.pack(side="left", padx=(6, 15))
+        self.female_box.bind("<<ComboboxSelected>>", self._remember_voices)
+        ttk.Label(second, text="Мужской:").pack(side="left")
+        self.male_box = ttk.Combobox(second, textvariable=self.voice_male,
+                                     state="readonly", width=30)
+        self.male_box.pack(side="left", padx=6)
+        self.male_box.bind("<<ComboboxSelected>>", self._remember_voices)
+        self._update_voice_options()
+
+        third = ttk.Frame(voice_section)
+        third.pack(fill="x")
+        ttk.Button(third, text="Обновить голоса", command=lambda: threading.Thread(
+            target=self._scan_voices, daemon=True).start()).pack(side="left")
+        ttk.Button(third, text="Прослушать выбранный режим",
+                   command=self._test_voice).pack(side="left", padx=8)
+        ttk.Button(third, text="Остановить речь", command=self._stop_speech).pack(side="left")
+        ttk.Label(third, text="Одновременно: оба голоса читают одну фразу.",
+                  foreground="#666666").pack(side="left", padx=12)
+
+        fourth = ttk.Frame(voice_section)
+        fourth.pack(fill="x", pady=(7, 1))
+        ttk.Label(fourth, text="Скорость:").pack(side="left")
+        ttk.Scale(fourth, from_=-40, to=60, variable=self.speed,
                   length=230).pack(side="left", padx=8)
-        ttk.Label(second, text="Громкость:").pack(side="left", padx=(18, 3))
-        ttk.Scale(second, from_=0, to=100, variable=self.volume, length=230).pack(side="left", padx=8)
+        ttk.Label(fourth, text="Громкость:").pack(side="left", padx=(18, 3))
+        ttk.Scale(fourth, from_=0, to=100, variable=self.volume, length=230).pack(side="left", padx=8)
 
         ttk.Label(pane, text="3. Выделите мышью область субтитров на видео",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(12, 5))
@@ -170,7 +227,9 @@ class Application:
         out.pack(fill="x")
         ttk.Label(out, text="Оригинал:").pack(anchor="w")
         ttk.Label(out, textvariable=self.subtitle, wraplength=900).pack(anchor="w")
-        ttk.Label(out, text="Украинский перевод:").pack(anchor="w", pady=(8, 0))
+        self.translation_title = ttk.Label(out, text="Перевод:")
+        self.translation_title.pack(anchor="w", pady=(8, 0))
+        self._update_translation_title()
         ttk.Label(out, textvariable=self.translation, wraplength=900,
                   font=("Segoe UI", 12, "bold")).pack(anchor="w")
         ttk.Label(pane, text="Для перевода и озвучки нужен интернет. Текст передаётся внешним сервисам.",
@@ -189,20 +248,97 @@ class Application:
         try:
             import edge_tts
             items = asyncio.run(edge_tts.list_voices())
-            voices = []
+            voices = {code: list(defaults) for code, defaults in VOICE_DEFAULTS.items()}
             for item in items:
-                if item.get("Locale", "").lower() == "uk-ua" and item.get("ShortName"):
-                    name = item["ShortName"]
-                    voices.append((name + (" — женский" if item.get("Gender") == "Female" else " — мужской"), name))
-            if voices:
-                self.events.put(("voices", sorted(voices)))
+                locale = item.get("Locale", "").lower()
+                code = {"uk-ua": "uk", "ru-ru": "ru"}.get(locale)
+                gender = item.get("Gender")
+                name = item.get("ShortName")
+                if code and name and gender in ("Female", "Male"):
+                    if name not in [entry[1] for entry in voices[code]]:
+                        label = name.split("-", 2)[-1] + (" — женский" if gender == "Female" else " — мужской")
+                        voices[code].append((label, name, gender))
+            for code in voices:
+                voices[code].sort(key=lambda item: (0 if item[2] == "Female" else 1, item[0]))
+            self.events.put(("voices", voices))
         except Exception as exc:
-            self.events.put(("status", f"Список голосов недоступен: {exc}"))
+            self.events.put(("status", f"Список голосов недоступен: {exc}. Доступны стандартные голоса."))
+
+    def _language_code(self):
+        return "ru" if self.output_language.get() == "Русский" else "uk"
+
+    def _update_translation_title(self):
+        if hasattr(self, "translation_title"):
+            name = "Русский" if self.target_code == "ru" else "Украинский"
+            self.translation_title.configure(text=f"{name} перевод:")
+
+    def _output_language_changed(self, _event=None):
+        self._remember_voices()
+        self.target_code = self._language_code()
+        self._update_voice_options()
+        self._update_translation_title()
+        self.translation.set("—")
+        self._stop_speech()
+
+    def _update_voice_options(self):
+        code = self.target_code
+        entries = self.voices_by_lang[code]
+        for gender, widget, variable in (
+            ("Female", self.female_box, self.voice_female),
+            ("Male", self.male_box, self.voice_male),
+        ):
+            available = [(label, identifier) for label, identifier, g in entries if g == gender]
+            widget["values"] = [label for label, identifier in available]
+            voice_id = self.selected_voices[code][gender]
+            selected = next((label for label, identifier in available if identifier == voice_id), None)
+            if selected is None:
+                selected, voice_id = available[0]
+                self.selected_voices[code][gender] = voice_id
+            variable.set(selected)
+
+    def _remember_voices(self, _event=None):
+        code = self.target_code
+        for gender, variable in (("Female", self.voice_female), ("Male", self.voice_male)):
+            label = variable.get()
+            voice_id = next((identifier for item_label, identifier, item_gender
+                             in self.voices_by_lang[code]
+                             if item_gender == gender and item_label == label), None)
+            if voice_id:
+                self.selected_voices[code][gender] = voice_id
+
+    def _selected_voice_ids(self, mode):
+        self._remember_voices()
+        options = self.selected_voices[self.target_code]
+        female = options["Female"]
+        male = options["Male"]
+        if mode == "Только женский":
+            return (female,)
+        if mode == "Только мужской":
+            return (male,)
+        if mode == "По очереди":
+            voice = female if self.voice_turn % 2 == 0 else male
+            self.voice_turn += 1
+            return (voice,)
+        return (female, male)
+
+    def _queue_speech(self, text, is_test=False):
+        voices = self._selected_voice_ids(self.voice_mode.get())
+        self.speech_serial += 1
+        self._submit_latest(self.speech_jobs, (
+            self.speech_serial, text, voices, self.speed.get(),
+            self.volume.get(), is_test
+        ))
 
     def _save(self):
         try:
             SETTINGS_FILE.write_text(json.dumps({"roi": self.roi, "source": self.source.get(),
-                "voice": self.voice.get(), "speed": self.speed.get(),
+                "output_language": self.output_language.get(),
+                "voice_mode": self.voice_mode.get(),
+                "female_uk": self.selected_voices["uk"]["Female"],
+                "male_uk": self.selected_voices["uk"]["Male"],
+                "female_ru": self.selected_voices["ru"]["Female"],
+                "male_ru": self.selected_voices["ru"]["Male"],
+                "speed": self.speed.get(),
                 "volume": self.volume.get(), "language": self.language.get()},
                 ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
@@ -242,16 +378,20 @@ class Application:
             messagebox.showerror("Видео", "Выберите существующий видеофайл")
             return
         self.stop_event.clear()
+        self.capture_serial += 1
+        session = self.capture_serial
+        self.voice_turn = 0
         self.last_ocr, self.last_sent, self.ocr_confirmations = "", "", 0
         self.start_button["state"] = "disabled"
         self.stop_button["state"] = "normal"
         self._save()
         choice = next((i for name, i in self.devices if name == self.device.get()), 0)
         arguments = (self.source.get(), choice, self.file.get(), LANGS[self.language.get()])
-        threading.Thread(target=self._capture, args=arguments, daemon=True).start()
+        threading.Thread(target=self._capture, args=(*arguments, session), daemon=True).start()
 
     def _stop(self):
         self.stop_event.set()
+        self.capture_serial += 1
         self._stop_speech()
         self.start_button["state"] = "normal"
         self.stop_button["state"] = "disabled"
@@ -268,7 +408,7 @@ class Application:
             pass
         q.put_nowait(item)
 
-    def _capture(self, source, index, filename, language):
+    def _capture(self, source, index, filename, language, session):
         capture = None
         screen = None
         try:
@@ -287,7 +427,7 @@ class Application:
             self.events.put(("status", "Захват работает. Выделите область субтитров."))
             last_check = 0
             blank_at = None
-            while not self.stop_event.is_set():
+            while not self.stop_event.is_set() and session == self.capture_serial:
                 if screen is not None:
                     frame = cv2.cvtColor(np.array(screen.grab(screen.monitors[1])), cv2.COLOR_BGRA2BGR)
                     ok = True
@@ -330,7 +470,7 @@ class Application:
                         if self.ocr_confirmations >= 2 and not text_similar(line, self.last_sent):
                             self.last_sent = line
                             self.events.put(("original", line))
-                            self._submit_latest(self.translate_jobs, line)
+                            self._submit_latest(self.translate_jobs, (session, line, self.target_code))
                 if screen is not None:
                     time.sleep(0.04)
         except Exception as exc:
@@ -340,65 +480,81 @@ class Application:
                 capture.release()
             if screen is not None:
                 screen.close()
-            self.events.put(("finished", None))
+            self.events.put(("finished", session))
 
     def _translator(self):
         from deep_translator import GoogleTranslator
         while True:
-            text = self.translate_jobs.get()
-            if self.stop_event.is_set():
+            session, text, target = self.translate_jobs.get()
+            if session != self.capture_serial or self.stop_event.is_set():
                 continue
             try:
-                result = GoogleTranslator(source="auto", target="uk").translate(text)
-                if result:
-                    self.events.put(("translation", result))
-                    self.speech_serial += 1
-                    self._submit_latest(self.speech_jobs,
-                                        (self.speech_serial, result, self.voice.get(), self.speed.get()))
+                result = GoogleTranslator(source="auto", target=target).translate(text)
+                if result and session == self.capture_serial and not self.stop_event.is_set():
+                    self.events.put(("translation", (session, target, result)))
             except Exception as exc:
                 self.events.put(("status", f"Ошибка перевода: {exc}"))
 
     def _speaker(self):
+        """Use separate mixer channels for two truly simultaneous TTS voices."""
         import edge_tts
         import pygame
         mixer_ready = False
         while True:
-            serial, text, label, speed = self.speech_jobs.get()
-            name = next((n for display, n in self.voices if display == label),
-                        FALLBACK_VOICES[0][1])
-            temp_path = None
+            serial, text, voices, speed, volume, is_test = self.speech_jobs.get()
+            paths = []
+            channels = []
+            sounds = []
             try:
-                if not mixer_ready:
-                    pygame.mixer.init()
-                    mixer_ready = True
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                    temp_path = f.name
-                asyncio.run(edge_tts.Communicate(text, name, rate=f"{max(-50, min(75, int(speed))):+d}%").save(temp_path))
                 if serial != self.speech_serial:
                     continue
-                pygame.mixer.music.load(temp_path)
-                pygame.mixer.music.set_volume(self.volume.get()/100)
-                pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy():
-                    if serial != self.speech_serial or self.stop_event.is_set():
-                        pygame.mixer.music.stop()
+                if not mixer_ready:
+                    pygame.mixer.init(frequency=24000, channels=2, buffer=1024)
+                    pygame.mixer.set_num_channels(8)
+                    mixer_ready = True
+                for _ in voices:
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as handle:
+                        paths.append(handle.name)
+
+                async def synthesize_all():
+                    await asyncio.gather(*(
+                        edge_tts.Communicate(text, voice,
+                            rate=f"{max(-50, min(75, int(speed))):+d}%").save(path)
+                        for voice, path in zip(voices, paths)
+                    ))
+                asyncio.run(synthesize_all())
+                if serial != self.speech_serial or (self.stop_event.is_set() and not is_test):
+                    continue
+                sounds = [pygame.mixer.Sound(path) for path in paths]
+                mix_volume = max(0.0, min(1.0, volume/100.0))
+                for idx, sound in enumerate(sounds):
+                    channel = pygame.mixer.Channel(idx)
+                    # Two voices share the output; reduce summed amplitude.
+                    channel.set_volume(mix_volume * (0.65 if len(sounds) == 2 else 1.0))
+                    channel.play(sound)
+                    channels.append(channel)
+                while any(channel.get_busy() for channel in channels):
+                    if (serial != self.speech_serial or self.closing
+                            or (self.stop_event.is_set() and not is_test)):
                         break
-                    time.sleep(0.08)
-                pygame.mixer.music.unload()
+                    time.sleep(0.05)
             except Exception as exc:
                 self.events.put(("status", f"Ошибка озвучки: {exc}"))
             finally:
-                if temp_path:
+                for channel in channels:
+                    channel.stop()
+                sounds.clear()
+                for path in paths:
                     try:
-                        os.unlink(temp_path)
+                        os.unlink(path)
                     except OSError:
                         pass
 
     def _test_voice(self):
-        self.speech_serial += 1
-        self._submit_latest(self.speech_jobs, (
-            self.speech_serial, "Вітаю! Це український голос у вашій грі.",
-            self.voice.get(), self.speed.get()))
+        text = ("Привет! Это проверка женского и мужского голоса."
+                if self.target_code == "ru"
+                else "Вітаю! Це перевірка жіночого та чоловічого голосу.")
+        self._queue_speech(text, is_test=True)
 
     def _render(self):
         if self.frame is None:
@@ -438,21 +594,22 @@ class Application:
                     if self.device.get() not in [name for name, _ in data]:
                         self.device.set(data[0][0])
                 elif kind == "voices":
-                    current_name = self.voice.get()
-                    self.voices = data
-                    self.voice_box["values"] = [name for name, _ in data]
-                    if current_name not in [name for name, _ in data]:
-                        saved_id = next((key for label, key in FALLBACK_VOICES if label == current_name), None)
-                        self.voice.set(next((label for label, key in data if key == saved_id), data[0][0]))
+                    self._remember_voices()
+                    self.voices_by_lang = data
+                    self._update_voice_options()
                 elif kind == "original":
                     self.subtitle.set(data)
                     self.translation.set("Перевод…")
                 elif kind == "translation":
-                    self.translation.set(data)
+                    session, language, text = data
+                    if session == self.capture_serial and language == self.target_code:
+                        self.translation.set(text)
+                        self._queue_speech(text)
                 elif kind == "status":
                     self.status.set(data)
                 elif kind == "finished":
-                    self._stop()
+                    if data == self.capture_serial:
+                        self._stop()
         except queue.Empty:
             pass
         if redraw:
@@ -460,6 +617,7 @@ class Application:
         self.root.after(120, self._poll)
 
     def _close(self):
+        self.closing = True
         self.stop_event.set()
         self._stop_speech()
         self._save()
