@@ -60,12 +60,15 @@ def same_remaining_window(first, second, now):
 def address_already_announced(value, old, state, groups, now, conditional):
     window = address_window(value)
     start, end = window
-    if same_remaining_window(window, address_window(old), now):
+    old_start, old_end = address_window(old)
+    if same_remaining_window(window, (old_start, old_end), now):
+        return True
+    if (start and old_start and not end and not old_end
+            and value.get("end") == old.get("end") and max(start, now) == max(old_start, now)):
         return True
     if not start or not end or end <= now or not groups or conditional:
         return False
-    _, old_end = address_window(old)
-    if old_end and old_end > now and old_end != end:
+    if old_end and old_end > now and (old_start or old_end != end):
         return False
     day = max(start, now).date()
     midnight = datetime.combine(day, datetime.min.time(), KYIV)
