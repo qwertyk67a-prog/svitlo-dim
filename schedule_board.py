@@ -104,17 +104,6 @@ def update_pin(state, text, chat, call, send, persist):
         owner = str(top.get("from", {}).get("id"))
         if owner == state.get("board:owner") and re.match(r"^\d{2}\.\d{2}\.\d{4}[^\n]*\n(?:Відключення|Можливі відключення)", previous):
             pin["previous"] = top["message_id"]
-    if not state.get("board:delivery_test_done"):
-        old = pin.get("id")
-        message_id = send(chat, text)
-        if not isinstance(message_id, int) or message_id <= 0:
-            raise RuntimeError("Missing schedule message ID")
-        if old and top.get("message_id") == old:
-            pin["previous"] = old
-        pin.update(id=message_id, digest=digest, pinned=False)
-        state["board:delivery_test_done"] = True
-        persist()
-        LOG.info("Schedule board sent")
     if pin.get("id") and not top:
         pin["pinned"] = False
     if pin.get("id") and pin.get("digest") != digest:
