@@ -4,7 +4,7 @@ import threading
 import unittest
 
 from app import (Application, normalize_roi, text_similar, crop_subtitle_area,
-                 is_nearly_black, parsed_ocr_words, subtitle_is_ready)
+                 is_nearly_black, parsed_ocr_words, subtitle_is_ready, is_fifine_card)
 import numpy as np
 
 
@@ -71,6 +71,15 @@ class PS5LiveSubtitleTests(unittest.TestCase):
         self.assertFalse(subtitle_is_ready("Come back!", 90, 1, False))
         self.assertTrue(subtitle_is_ready("Come back!", 54, 2, True))
         self.assertFalse(subtitle_is_ready("...", 21, 1, True))
+
+
+class FifineDeviceTests(unittest.TestCase):
+    def test_device_names(self):
+        self.assertTrue(is_fifine_card("Fifine Video Capture (#2)"))
+        self.assertTrue(is_fifine_card("FIFINE AMPLIGAME V3"))
+        self.assertTrue(is_fifine_card("AmpliGame V3 Capture Card"))
+        self.assertFalse(is_fifine_card("Integrated Laptop Camera"))
+        self.assertFalse(is_fifine_card("OBS Virtual Camera"))
 
 
 if __name__ == "__main__":
