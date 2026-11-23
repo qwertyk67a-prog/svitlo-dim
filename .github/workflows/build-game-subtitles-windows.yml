@@ -1,0 +1,55 @@
+name: Build Game Subtitles UA Windows EXE
+on:
+  push:
+    branches:
+      - build-game-subtitles-ua
+    paths:
+      - "game-subtitles-ua/**"
+      - ".github/workflows/build-game-subtitles-windows.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r game-subtitles-ua/requirements.txt "pyinstaller>=6.10,<7"
+          python -c "import cv2, numpy, PIL, pytesseract, edge_tts, pygame, mss, pygrabber, deep_translator, tkinter; print('Imports OK')"
+          python -m py_compile game-subtitles-ua/app.py
+      - name: Install bundled OCR
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          $ocr = 'C:\Program Files\Tesseract-OCR'
+          if (!(Test-Path "$ocr\tesseract.exe")) { throw "Tesseract executable missing in $ocr" }
+          New-Item -ItemType Directory -Force "$ocr\tessdata" | Out-Null
+          foreach ($lang in @('eng','rus','ukr','jpn','deu','fra','spa','pol','osd')) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$lang.traineddata" -OutFile "$ocr\tessdata\$lang.traineddata"
+          }
+          & "$ocr\tesseract.exe" --list-langs
+      - name: Create standalone executable
+        shell: pwsh
+        run: |
+          $ocr = 'C:\Program Files\Tesseract-OCR'
+          python -m PyInstaller --noconfirm --clean --windowed --onefile --name GameSubtitlesUA --collect-all edge_tts --collect-all pygame --collect-submodules comtypes --hidden-import pygrabber.dshow_graph --add-binary "$ocr;tesseract" game-subtitles-ua/app.py
+          if (!(Test-Path 'dist\GameSubtitlesUA.exe')) { throw 'GameSubtitlesUA.exe was not created' }
+          $exe = Get-Item 'dist\GameSubtitlesUA.exe'
+          Write-Host "EXE size:" $exe.Length "bytes"
+      - name: Upload ready-to-run EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameSubtitlesUA-Windows-EXE
+          path: dist/GameSubtitlesUA.exe
+          if-no-files-found: error
+          retention-days: 30
