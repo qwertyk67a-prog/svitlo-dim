@@ -885,3 +885,50 @@ def test_schedule_cancellation_keeps_confirmed_address_outage_visible(tmp_path, 
     assert sent[-1].splitlines() == [
         "19.11.2026", "Відключення за графіком скасовано",
         "За адресою вказано відключення до 23:30"]
+
+
+
+def test_later_address_correction_preserves_evening_outage(tmp_path, monkeypatch):
+    import alerts
+    _, current, sent = _late_test_setup(tmp_path, monkeypatch, {})
+    now = datetime(2026, 11, 24, 14, 36, tzinfo=KYIV)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr(bot, "datetime", Clock)
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", True)
+    group = "GPV3.1"
+    stamp = str(int(now.timestamp()))
+    slots = {"1": "yes", "2": "no", "3": "yes", "4": "no"}
+    labels = {"1":"00:00–11:30", "2":"11:30–18:30", "3":"18:30–22:00", "4":"22:00–24:00"}
+    source = _late_schedule(current["source"])
+    source.fact.days = {stamp: {group: slots}}
+    source.preset.time_zone = labels
+    entry = address_entry([group])
+    entry.start_date = "24.11.2026 12:05"
+    entry.end_date = "24.11.2026 15:30"
+
+    async def home(_secret):
+        return entry
+
+    async def schedule(_groups):
+        return source, [group]
+
+    monkeypatch.setattr(alerts, "fetch_address_status", home)
+    monkeypatch.setattr(bot, "get_schedule", schedule)
+    slots["2"] = "yes"
+    asyncio.run(bot.once())
+    slots["2"] = "no"
+    asyncio.run(bot.once())
+    assert sent[-1].endswith("11:30–18:30\n22:00–24:00")
+    count = len(sent)
+    entry.end_date = "24.11.2026 18:30"
+    asyncio.run(bot.once())
+    assert len(sent) == count
+    entry.end_date = "24.11.2026 19:00"
+    asyncio.run(bot.once())
+    assert len(sent) == count + 1
+    assert "12:05–19:00" in sent[-1] and "22:00–24:00" in sent[-1]
