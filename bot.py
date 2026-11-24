@@ -1134,13 +1134,22 @@ async def once():
         board = build_board(cache, source, house_groups, now, uncertain_gpv, house,
                             "address_lookup" not in source_problems, parse_verified, compact_daily_message)
         persist()
+        pin_result = "unknown"
         for action in (update_pin, answer_commands):
             try:
                 action(state, board, chat, call, send_board, persist)
+                if action is update_pin:
+                    pin_result = "ok"
             except RuntimeError as exc:
                 LOG.warning("Telegram %s: %s", action.__name__, exc)
                 if action is answer_commands:
                     problems.append("now_commands")
+                else:
+                    pin_result = "failed"
+        output = os.getenv("GITHUB_OUTPUT")
+        if output:
+            with open(output, "a", encoding="utf-8") as report:
+                print(f"pin_health={pin_result}", file=report)
     if problems:
         raise RuntimeError(f"Помилки Telegram: {len(problems)}; успішні події збережено")
     if source_problems:

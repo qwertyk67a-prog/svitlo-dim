@@ -3,7 +3,7 @@
  * Contains no address, provider URL, Telegram token or chat ID.
  * This Worker exposes no HTTP request handler.
  */
-import { checkExternalHealth } from "./watchdog.js";
+import { checkExternalHealth, checkPinHealth } from "./watchdog.js";
 
 async function dispatchGitHub(env) {
     if (env.ENABLED !== "true") {
@@ -62,6 +62,10 @@ export default {
         // Never log API response bodies, Telegram URLs or secret values.
         healthError = error;
       }
+    }
+    if (env.WATCHDOG_ENABLED === "true") {
+      const pin = await checkPinHealth(env);
+      console.log("Schedule pin health:", pin);
     }
     if (dispatchError) throw dispatchError;
     if (healthError) throw healthError;

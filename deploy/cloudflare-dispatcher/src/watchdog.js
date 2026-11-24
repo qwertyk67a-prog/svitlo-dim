@@ -29,16 +29,14 @@ export function assessRuns(runs, nowMs) {
   });
 }
 
-async function githubHealthy(repository, token, fetchFn, nowMs) {
-  const url = "https://api.github.com/repos/" + repository +
-    "/actions/workflows/check.yml/runs?per_page=20&branch=main";
+async function readGitHub(endpoint, token, fetchFn) {
   const standardHeaders = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "svitlo-external-watchdog",
   };
-  async function read(endpoint) {
-    let response = await fetchFn(endpoint, {
+
+  let response = await fetchFn(endpoint, {
       headers: token ? { ...standardHeaders, Authorization: "Bearer " + token } : standardHeaders,
       signal: AbortSignal.timeout(15000),
     });
@@ -46,7 +44,13 @@ async function githubHealthy(repository, token, fetchFn, nowMs) {
       response = await fetchFn(endpoint, { headers: standardHeaders, signal: AbortSignal.timeout(15000) });
     }
     return response.ok ? response.json() : null;
-  }
+
+}
+
+async function githubHealthy(repository, token, fetchFn, nowMs) {
+  const url = "https://api.github.com/repos/" + repository +
+    "/actions/workflows/check.yml/runs?per_page=20&branch=main";
+  const read = endpoint => readGitHub(endpoint, token, fetchFn);
   try {
     const history = await read(url);
     if (!Array.isArray(history?.workflow_runs)) return false;
@@ -163,4 +167,41 @@ export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now
     ))
   );
   return "alert_sent";
+}
+
+export async function checkPinHealth(env, fetchFn = fetch, nowMs = Date.now()) {
+  const repository = verifyRepository(env.TARGET_REPOSITORY);
+  const root = "https://api.github.com/repos/" + repository + "/actions";
+  const read = path => readGitHub(root + path, env.GH_WORKFLOW_TOKEN, fetchFn);
+  const history = await read("/workflows/check.yml/runs?per_page=20&branch=main");
+  const runs = (history?.workflow_runs || []).filter(run =>
+    Number.isSafeInteger(run.id) && run.id > 0 && run.status === "completed" &&
+    run.head_branch === "main" && ["workflow_dispatch", "schedule"].includes(run.event) &&
+    nowMs >= Date.parse(run.created_at) && nowMs - Date.parse(run.created_at) <= HEALTH_WINDOW_MS
+  ).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
+  const distinct = [...new Set(runs.map(run => run.id))];
+  async function observation(id) {
+    const data = await read("/runs/" + id + "/jobs");
+    const steps = data?.jobs?.flatMap(job => job.steps || []) || [];
+    const passed = name => steps.some(step => step.name === name && step.conclusion === "success");
+    if (passed("Schedule pin confirmed")) return "ok";
+    if (passed("Schedule pin failed")) return "failed";
+    return "unknown";
+  }
+  if (!distinct.length) return "unknown";
+  const latest = await observation(distinct[0]);
+  if (latest === "unknown") return latest;
+  const key = "svitlo:pin:v1:" + repository;
+  const alerted = await env.WATCHDOG_KV.get(key) === "alerted";
+  if (latest === "ok") {
+    if (alerted) {
+      await sendTelegram(env, "✅ Закріплення графіка підтверджено. Роботу відновлено.", fetchFn);
+      await env.WATCHDOG_KV.delete(key);
+    }
+    return "ok";
+  }
+  if (alerted || distinct.length < 2 || await observation(distinct[1]) !== "failed") return "pending";
+  await sendTelegram(env, "⚠️ Дві перевірки поспіль не підтвердили закріплення графіка. Перевірте закріплене повідомлення та права бота.", fetchFn);
+  await env.WATCHDOG_KV.put(key, "alerted");
+  return "alerted";
 }

@@ -104,7 +104,7 @@ def update_pin(state, text, chat, call, send, persist):
         owner = str(top.get("from", {}).get("id"))
         if owner == state.get("board:owner") and re.match(r"^\d{2}\.\d{2}\.\d{4}[^\n]*\n(?:Відключення|Можливі відключення)", previous):
             pin["previous"] = top["message_id"]
-    if pin.get("id") and not top:
+    if pin.get("id") and top.get("message_id") != pin["id"]:
         pin["pinned"] = False
     if pin.get("id") and pin.get("digest") != digest:
         try:

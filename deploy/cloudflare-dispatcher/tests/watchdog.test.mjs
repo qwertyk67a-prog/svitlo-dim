@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assessRuns, checkExternalHealth } from "../src/watchdog.js";
+import { assessRuns, checkExternalHealth, checkPinHealth } from "../src/watchdog.js";
 import worker from "../src/index.js";
 
 const T = Date.parse("2026-11-22T13:00:00Z");
@@ -238,4 +238,33 @@ test("a successful scheduled run must have executed the production check", async
     assert.equal(await checkExternalHealth(env(kv), mockFetch, T),
       conclusion === "success" ? "healthy" : "suspect");
   }
+});
+
+test("pin alarm requires two distinct failures and recovers exactly once", async () => {
+  const values = new Map();
+  const kv = {get: k => values.get(k), put: (k,v) => values.set(k,v), delete: k => values.delete(k)};
+  let ids = [2, 2], latest = "failed";
+  const messages = [];
+  const fetchFn = async (url, opts) => {
+    if (url.includes("/workflows/")) return response(200, {workflow_runs: ids.map(id => ({...record(4-id), id}))});
+    if (url.endsWith("/jobs")) {
+      const status = url.endsWith("/3/jobs") ? latest : "failed";
+      return response(200, {jobs: [{steps: [{name: "Schedule pin " + status, conclusion: "success"}]}]});
+    }
+    messages.push(JSON.parse(opts.body).text);
+    return response(200, {ok:true});
+  };
+  const check = () => checkPinHealth(env(kv), fetchFn, T);
+  assert.equal(await check(), "pending");
+  ids = [2,1];
+  assert.equal(await check(), "alerted");
+  await check();
+  ids = [3,2];
+  latest = "unknown";
+  assert.equal(await check(), "unknown");
+  latest = "confirmed";
+  await check();
+  await check();
+  assert.equal(messages.length, 2);
+  assert.equal(values.size, 0);
 });

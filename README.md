@@ -142,9 +142,9 @@ Paste the resulting 64 hexadecimal characters only into your GitHub Secret. Neve
 Follow [Cloudflare setup](deploy/cloudflare-dispatcher/README.md) for the dispatcher and its private administrator watchdog. Every installation needs a separate Telegram destination, encryption key and state. A new repository must have Actions enabled. Keep the default branch named main.
 
 When a supplier has no public Telegram bulletin channel, omit telegram_feed
-and set the repository Secret ANNOUNCEMENTS_ENABLED to false. Address queries
-and daily schedules still require ajax_v1. The site and AJAX endpoint must
-use the same hostname. Verify the actual house and daily schedule using the
+and set the repository Secret ANNOUNCEMENTS_ENABLED to false. Address queries and daily schedules support either adapter. With ajax_v1,
+site_url and ajax_url must share a hostname. With mapped_json_v1, supply
+a compatible mapping and public HTTPS JSON feeds, which may use different hosts. Verify the actual house and daily schedule using the
 read-only workflows before activating a copy.
 
 Both Telegram bots can have any username. Manual discovery accepts group
@@ -160,3 +160,5 @@ Resident messages are silent from 21:00 through 08:59 in Europe/Kyiv.
 Send /now in the configured chat, or privately as a verified group member.
 The regular monitoring job reads commands, so replies may take one polling
 cycle. Missing or incomplete source data are labelled on the saved schedule.
+
+The private watchdog reports two consecutive failed schedule-pin checks separately from runner health. It reports recovery after a confirmed pin. Missing observations do not prove failure or recovery.
