@@ -81,10 +81,10 @@ jobs:
           STATE_PATH: bot_state.json
         run: python bot.py --once
       - name: Schedule pin confirmed
-        if: always() && steps.notify.outputs.pin_health == 'ok'
+        if: always() && steps.gate.outputs.active == 'true' && steps.notify.outputs.pin_health == 'ok'
         run: echo "Telegram confirmed the schedule pin"
       - name: Schedule pin failed
-        if: always() && steps.notify.outputs.pin_health == 'failed'
+        if: always() && steps.gate.outputs.active == 'true' && steps.notify.outputs.pin_health == 'failed'
         run: echo "::warning::Telegram schedule pin could not be confirmed"
       - name: Save notification state to isolated branch
         if: always() && steps.gate.outputs.active == 'true' && steps.load_state.outcome == 'success' && steps.notify.outcome != 'skipped'
