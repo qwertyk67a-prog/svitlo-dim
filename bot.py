@@ -109,6 +109,28 @@ def compact_address_message(value, now):
     return day.strftime("%d.%m.%Y") + "\nВідключення:\n" + detail
 
 
+def address_notice_with_schedule(value, now, source, groups, conditional):
+    message = compact_address_message(value, now)
+    start, end = address_window(value)
+    if not (start and end and start.date() == now.date() and source and source.fact and groups):
+        return message
+    day = start.date()
+    midnight = datetime.combine(day, datetime.min.time(), KYIV)
+    for stamp, rows in source.fact.days.items():
+        if datetime.fromtimestamp(int(stamp), KYIV).date() != day:
+            continue
+        for group in groups:
+            spans = parse_verified(rows.get(group), source.preset.time_zone)
+            later = [(a, b, mode) for a, b, mode in spans or ()
+                     if midnight + timedelta(minutes=a) >= end
+                     and midnight + timedelta(minutes=b) > now]
+            if later:
+                section = compact_daily_message(day, later, group=group if len(groups) > 1 else None,
+                                                conditional=conditional)
+                message += "\n\nДалі за графіком:\n" + section
+    return message
+
+
 def time_range(label):
     """Parse provider hourly '00-01' and minute-precision '00:00–01:00' slots."""
     source = str(label).strip()
@@ -1023,11 +1045,14 @@ async def once():
             date_key = max(start, now).date().isoformat() if start else ""
             same_run = bool(house_groups) and all(
                 f"{date_key}:{group}" in delivered_schedule_keys for group in house_groups)
-            old = None if same_run else state.get(key)
+            covered = state.get("address:later_schedules", [])
+            newer_schedule = bool(house_groups) and all(
+                f"{date_key}:{group}" in covered for group in house_groups)
+            old = None if same_run or newer_schedule else state.get(key)
             if address_already_announced(value, old, state, house_groups, now, uncertain_gpv):
                 message = None
             else:
-                message = compact_address_message(value, now)
+                message = address_notice_with_schedule(value, now, source, house_groups, uncertain_gpv)
         if not message:
             state[key] = value
             persist()
@@ -1055,6 +1080,11 @@ async def once():
             continue
         if origin == "schedule":
             delivered_schedule_keys.add(key)
+            if key[:10] in (today.isoformat(), (today + timedelta(days=1)).isoformat()):
+                covered = [k for k in state.get("address:later_schedules", []) if k[:10] >= today.isoformat()]
+                state["address:later_schedules"] = sorted(set(covered + [key]))
+        elif origin == "address" and key == "address:last_outage":
+            state["address:later_schedules"] = []
         last_send = time.monotonic()
         if origin == "official":
             state["official:last_id"] = max(
