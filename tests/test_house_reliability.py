@@ -904,7 +904,7 @@ def test_later_address_correction_preserves_evening_outage(tmp_path, monkeypatch
     stamp = str(int(now.timestamp()))
     slots = {"1": "yes", "2": "no", "3": "yes", "4": "no"}
     labels = {"1":"00:00–11:30", "2":"11:30–18:30", "3":"18:30–22:00", "4":"22:00–24:00"}
-    source = _late_schedule(current["source"])
+    source, _ = _late_schedule(current["source"])
     source.fact.days = {stamp: {group: slots}}
     source.preset.time_zone = labels
     entry = address_entry([group])
