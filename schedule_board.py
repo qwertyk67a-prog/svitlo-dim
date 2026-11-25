@@ -96,7 +96,7 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                     continue
                 if not saved_week or day >= monday + timedelta(days=7):
                     continue
-                block = compact_forecast_day(day, saved_week[day.weekday()], label)
+                block = compact_forecast_day(day, saved_week[day.weekday()], label, now)
                 if week is None:
                     block += "\n(останні збережені дані)"
                 sections.append(block)
