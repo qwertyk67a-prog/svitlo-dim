@@ -479,6 +479,31 @@ def verified_week(source, group):
     return week
 
 
+def weekly_notice(entries, activation, digest, previous, now):
+    """Compare both verified schedules at one Kyiv time, including the active slot."""
+    days = {day.isoformat(): [list(span) for span in spans] for day, spans in entries}
+    record = {"status": "outages", "digest": digest, "days": days, "activation": activation}
+    if state_digest(previous) == digest:
+        return record, False
+    if not isinstance(previous, dict) or previous.get("activation") != activation:
+        return record, True
+    old_days = previous.get("days")
+    if not isinstance(old_days, dict):
+        # An older checkpoint has only a hash. A changed plan may affect the future.
+        return record, True
+
+    local = now.astimezone(KYIV)
+    today = local.date().isoformat()
+    minute = local.hour * 60 + local.minute
+
+    def remaining(schedule):
+        return [(day, max(start, minute) if day == today else start, end)
+                for day, spans in sorted(schedule.items()) if day >= today
+                for start, end in spans if day > today or end > minute]
+
+    return record, remaining(old_days) != remaining(days)
+
+
 def collect_notifications(source, group, today, state=None, report_empty_week=False):
     """
     Return notification candidates only for actual changes.
@@ -908,7 +933,7 @@ async def once():
                     and bool(old.get("conditional")) != uncertain_gpv
                     and any(mode == "off" for _, _, mode in upcoming_spans(parts[0], parts[1], now))
                 )
-                if state_digest(old) == digest and not certainty_changed:
+                if kind != "week" and state_digest(old) == digest and not certainty_changed:
                     continue
                 previous_status = state_status(old)
                 next_state = {
@@ -982,6 +1007,13 @@ async def once():
                     priority = 2
                 elif kind == "week":
                     monday, entries = parts
+                    next_state, notify = weekly_notice(
+                        entries, state.get("board:weekly_activation"), digest, old, now)
+                    if not notify:
+                        if next_state != old:
+                            state[key] = next_state
+                            persist()
+                        continue
                     by_day = dict(entries)
                     label = group if len(groups) > 1 else None
                     days = (monday + timedelta(days=n) for n in range(7))
