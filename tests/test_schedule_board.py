@@ -75,8 +75,9 @@ def test_combined_week_respects_facts_stale_forecast_and_sunday_boundary():
     text = render(source)
     assert text.count("25.11.2026") == 1
     assert "25.11.2026\nВідключення:\n12:00–24:00" in text
-    assert "26.11.2026 · 00:00–12:00" in text
-    assert "30.11.2026 · прогноз недоступний" in text
-    assert "01.12.2026 · прогноз недоступний" in text
+    assert "\n\n26.11.2026\n00:00–12:00\n\n27.11.2026" in text
+    assert "Тижневий" not in text
+    assert "30.11.2026" not in text
+    assert "01.12.2026" not in text
     assert "останні збережені дані" in render(None)
     assert "Тижневий" not in render(source, False)

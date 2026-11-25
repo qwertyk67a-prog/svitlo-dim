@@ -77,14 +77,13 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                 header = format_day(day, [], group=label).splitlines()[0]
                 sections.append(header + "\nПідтверджений графік недоступний")
     if include_week:
-        from bot import clock, verified_week
+        from bot import compact_forecast_day, verified_week
 
         monday = dates[0] - timedelta(days=dates[0].weekday())
         forecast = cache.setdefault("forecast", {})
         if forecast.get("week") != monday.isoformat():
             forecast.clear()
             forecast["week"] = monday.isoformat()
-        preview = []
         for group in cache.get("groups", []):
             week = verified_week(source, group) if source and reliable and group in groups else None
             if week is not None:
@@ -95,17 +94,12 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                 day = dates[0] + timedelta(days=n)
                 if group in records.get(day.isoformat(), {}):
                     continue
-                header = format_day(day, [], group=label).splitlines()[0]
                 if not saved_week or day >= monday + timedelta(days=7):
-                    value = "прогноз недоступний"
-                else:
-                    spans = saved_week[day.weekday()]
-                    value = ", ".join(f"{clock(a)}–{clock(b)}" for a, b in spans) or "відключень не передбачено"
-                    if week is None:
-                        value += " (останні збережені дані)"
-                preview.append(header + " · " + value)
-        if preview:
-            sections.append("Тижневий прогноз можливих відключень\n" + "\n".join(preview))
+                    continue
+                block = compact_forecast_day(day, saved_week[day.weekday()], label)
+                if week is None:
+                    block += "\n(останні збережені дані)"
+                sections.append(block)
     if not sections:
         sections.append(now.strftime("%d.%m.%Y") + "\nПідтверджений графік недоступний")
     if address:

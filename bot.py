@@ -24,6 +24,14 @@ LOG = logging.getLogger("outage-bot")
 COMPACT_DAILY_SCHEDULE = True
 
 
+def compact_forecast_day(day, spans, group=None):
+    header = day.strftime("%d.%m.%Y")
+    if group is not None:
+        header += " · Черга " + html.escape(queue_label(group))
+    times = [f"{clock(a)}–{clock(b)}" for a, b in spans]
+    return "\n".join([header, *(times or ["Відключень не передбачено"])])
+
+
 def compact_daily_message(day, spans, *, group=None, conditional=False):
     date_line = day.strftime("%d.%m.%Y")
     if group is not None:
@@ -974,15 +982,10 @@ async def once():
                 elif kind == "week":
                     monday, entries = parts
                     by_day = dict(entries)
-                    days = [monday + timedelta(days=n) for n in range(7)]
-                    lines = ["Тижневий прогноз можливих відключень · Черга "
-                             + html.escape(queue_label(group))]
-                    for day in days:
-                        spans = by_day.get(day, ())
-                        times = ", ".join(f"{clock(a)}–{clock(b)}" for a, b in spans)
-                        lines.append(f"{day:%d.%m.%Y} · " + (times or "відключень не передбачено"))
-                    lines.append("Для сьогодні й завтра перевіряйте добовий графік у закріпленому повідомленні.")
-                    message = "\n".join(lines)
+                    label = group if len(groups) > 1 else None
+                    days = (monday + timedelta(days=n) for n in range(7))
+                    message = "\n\n".join(compact_forecast_day(day, by_day.get(day, ()), label)
+                                           for day in days)
                     priority = 7
                 elif kind == "week_cancel":
                     message = weekly_cancellation_message(parts[0], group)
