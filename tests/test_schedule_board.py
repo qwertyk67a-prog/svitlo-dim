@@ -58,3 +58,25 @@ def test_invalid_table_keeps_cache_and_rollover_removes_yesterday():
     source.fact.days[stamp]["q"] = {"1":"yes"}
     assert "00:00–12:00\nОстанні збережені дані" in render(now)
     assert "00:00–12:00" not in render(now.replace(day=24))
+
+
+def test_combined_week_respects_facts_stale_forecast_and_sunday_boundary():
+    now = datetime(2026, 11, 25, 12, tzinfo=KYIV)
+    slots = {"1": "no", "2": "yes"}
+    forecast = SimpleNamespace(get_day=lambda weekday: SimpleNamespace(slots=slots))
+    preset = SimpleNamespace(is_active=True, time_zone={"1":"00-12","2":"12-24"}, groups={"q": forecast})
+    source = SimpleNamespace(preset=preset, fact=SimpleNamespace(days={
+        str(int(now.timestamp())): {"q": {"1":"yes","2":"no"}}
+    }))
+    cache = {}
+    def render(source, week=True):
+        return build_board(cache, source, ["q"], now, False, None, True,
+                           parse_verified, compact_daily_message, include_week=week)
+    text = render(source)
+    assert text.count("25.11.2026") == 1
+    assert "25.11.2026\nВідключення:\n12:00–24:00" in text
+    assert "26.11.2026 · 00:00–12:00" in text
+    assert "30.11.2026 · прогноз недоступний" in text
+    assert "01.12.2026 · прогноз недоступний" in text
+    assert "останні збережені дані" in render(None)
+    assert "Тижневий" not in render(source, False)

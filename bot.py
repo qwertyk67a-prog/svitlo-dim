@@ -21,7 +21,6 @@ from house_reliability import queue_label
 LOG = logging.getLogger("outage-bot")
 
 
-SEND_WEEKLY_SCHEDULE = False
 COMPACT_DAILY_SCHEDULE = True
 
 
@@ -455,7 +454,23 @@ def parse_verified(slots, labels):
     return spans
 
 
-def collect_notifications(source, group, today, state=None):
+def verified_week(source, group):
+    """Return all seven days, including verified empty days, or no forecast."""
+    preset = source.preset
+    plan = preset.groups.get(group) if preset and preset.is_active else None
+    if not plan:
+        return None
+    week = []
+    for weekday in range(1, 8):
+        item = plan.get_day(weekday)
+        spans = parse_verified(item.slots, preset.time_zone) if item else None
+        if spans is None:
+            return None
+        week.append(tuple((a, b) for a, b, _ in spans))
+    return week
+
+
+def collect_notifications(source, group, today, state=None, report_empty_week=False):
     """
     Return notification candidates only for actual changes.
 
@@ -494,23 +509,12 @@ def collect_notifications(source, group, today, state=None):
 
     monday = today - timedelta(days=today.weekday())
     week_key = f"week:{monday.isoformat()}:{group}"
-    plan = source.preset.groups.get(group) if source.preset.is_active else None
-    entries = []
-    all_seven_verified = bool(plan)
-    if plan:
-        for weekday in range(1, 8):
-            item = plan.get_day(weekday)
-            spans = parse_verified(item.slots, labels) if item else None
-            if spans is None:
-                all_seven_verified = False
-                break
-            if spans:
-                entries.append((
-                    monday + timedelta(days=weekday - 1),
-                    tuple((a, b) for a, b, _mode in spans),
-                ))
+    week = verified_week(source, group)
+    all_seven_verified = week is not None
+    entries = [(monday + timedelta(days=n), spans)
+               for n, spans in enumerate(week or []) if spans]
 
-    if all_seven_verified and entries:
+    if all_seven_verified and (entries or report_empty_week):
         # Maintain prior weekly hash for previously sent weekly forecasts.
         payload = (monday.isoformat(), group,
                    tuple((day.isoformat(), spans) for day, spans in entries))
@@ -690,6 +694,9 @@ async def once():
         trim_state, verified_house_queues, cached_queue_is_fresh,
     )
 
+    weekly_mode = os.getenv("WEEKLY_SCHEDULE_MODE", "off").strip().lower() or "off"
+    if weekly_mode not in ("off", "combined", "separate"):
+        raise ValueError("WEEKLY_SCHEDULE_MODE must be off, combined or separate")
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -717,6 +724,10 @@ async def once():
     today = now.date()
     leads = parse_reminder_minutes(os.getenv("REMINDER_MINUTES", "0"))
     trim_state(state, today)
+    if weekly_mode != state.get("board:weekly_mode", "off"):
+        state["board:weekly_mode"] = weekly_mode
+        if weekly_mode == "separate":
+            state["board:weekly_activation"] = now.isoformat()
     persist()
     problems = []
     source_problems = []
@@ -873,9 +884,14 @@ async def once():
                         source_problems.append("invalid_daily_fact")
                         LOG.warning("Опублікована добова таблиця пошкоджена")
         for group in groups:
-            for key, payload, kind, parts in collect_notifications(source, group, today, state):
-                if kind in ("week", "week_cancel") and not SEND_WEEKLY_SCHEDULE:
+            for key, payload, kind, parts in collect_notifications(
+                    source, group, today, state, weekly_mode == "separate"):
+                if kind in ("week", "week_cancel") and weekly_mode != "separate":
                     continue
+                if weekly_mode == "combined" and kind in ("day", "day_cancel"):
+                    continue
+                if kind == "week":
+                    payload = (state.get("board:weekly_activation"), payload)
                 digest = fingerprint(payload)
                 old = state.get(key)
                 certainty_changed = (
@@ -957,23 +973,16 @@ async def once():
                     priority = 2
                 elif kind == "week":
                     monday, entries = parts
-                    confirmed_days = set()
-                    if source.fact:
-                        for stamp, group_map in source.fact.days.items():
-                            confirmed_day = datetime.fromtimestamp(
-                                int(stamp), KYIV
-                            ).date()
-                            slots = group_map.get(group)
-                            if parse_verified(
-                                slots, source.preset.time_zone
-                            ) is not None:
-                                confirmed_days.add(confirmed_day)
-                    message = weekly_message(
-                        monday, group, entries,
-                        changed=previous_status == "outages",
-                        observed_at=now,
-                        confirmed_days=confirmed_days,
-                    )
+                    by_day = dict(entries)
+                    days = [monday + timedelta(days=n) for n in range(7)]
+                    lines = ["Тижневий прогноз можливих відключень · Черга "
+                             + html.escape(queue_label(group))]
+                    for day in days:
+                        spans = by_day.get(day, ())
+                        times = ", ".join(f"{clock(a)}–{clock(b)}" for a, b in spans)
+                        lines.append(f"{day:%d.%m.%Y} · " + (times or "відключень не передбачено"))
+                    lines.append("Для сьогодні й завтра перевіряйте добовий графік у закріпленому повідомленні.")
+                    message = "\n".join(lines)
                     priority = 7
                 elif kind == "week_cancel":
                     message = weekly_cancellation_message(parts[0], group)
@@ -1132,7 +1141,8 @@ async def once():
             state["board:owner"] = owner
         cache = state.setdefault("board:cache", {})
         board = build_board(cache, source, house_groups, now, uncertain_gpv, house,
-                            "address_lookup" not in source_problems, parse_verified, compact_daily_message)
+                            "address_lookup" not in source_problems, parse_verified, compact_daily_message,
+                            include_week=weekly_mode == "combined")
         persist()
         pin_result = "unknown"
         for action in (update_pin, answer_commands):

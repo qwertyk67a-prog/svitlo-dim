@@ -41,8 +41,8 @@ def api(token, method, **params):
     return body["result"]
 
 
-def build_board(cache, source, groups, now, conditional, address, reliable, parse, format_day):
-    from alerts import exact_provider_time
+def build_board(cache, source, groups, now, conditional, address, reliable, parse, format_day,
+                include_week=False):
     groups = sorted(groups or [])
     if groups and groups != cache.get("groups"):
         cache.clear()
@@ -73,12 +73,43 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                 sections.append(saved[group])
             elif group in saved:
                 sections.append(saved[group] + "\nОстанні збережені дані. Оновлення не підтверджено.")
-            elif day == dates[0] or slots is not None:
+            elif not include_week and (day == dates[0] or slots is not None):
                 header = format_day(day, [], group=label).splitlines()[0]
                 sections.append(header + "\nПідтверджений графік недоступний")
+    if include_week:
+        from bot import clock, verified_week
+
+        monday = dates[0] - timedelta(days=dates[0].weekday())
+        forecast = cache.setdefault("forecast", {})
+        if forecast.get("week") != monday.isoformat():
+            forecast.clear()
+            forecast["week"] = monday.isoformat()
+        preview = []
+        for group in cache.get("groups", []):
+            week = verified_week(source, group) if source and reliable and group in groups else None
+            if week is not None:
+                forecast.setdefault("groups", {})[group] = week
+            saved_week = forecast.get("groups", {}).get(group)
+            label = group if len(cache["groups"]) > 1 else None
+            for n in range(7):
+                day = dates[0] + timedelta(days=n)
+                if group in records.get(day.isoformat(), {}):
+                    continue
+                header = format_day(day, [], group=label).splitlines()[0]
+                if not saved_week or day >= monday + timedelta(days=7):
+                    value = "прогноз недоступний"
+                else:
+                    spans = saved_week[day.weekday()]
+                    value = ", ".join(f"{clock(a)}–{clock(b)}" for a, b in spans) or "відключень не передбачено"
+                    if week is None:
+                        value += " (останні збережені дані)"
+                preview.append(header + " · " + value)
+        if preview:
+            sections.append("Тижневий прогноз можливих відключень\n" + "\n".join(preview))
     if not sections:
         sections.append(now.strftime("%d.%m.%Y") + "\nПідтверджений графік недоступний")
     if address:
+        from alerts import exact_provider_time
         start = exact_provider_time(address.start_date)
         end = exact_provider_time(address.end_date)
         if start and end and start <= now < end:
