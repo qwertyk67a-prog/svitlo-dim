@@ -117,6 +117,8 @@ def parse_homes(raw):
         groups = []
         for record in records:
             entries = record.get("sub_type_reason")
+            if isinstance(entries, str):
+                entries = [entries]
             if isinstance(entries, list):
                 for group in entries:
                     if isinstance(group, str) and group not in groups:
