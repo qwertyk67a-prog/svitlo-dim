@@ -179,10 +179,10 @@ Each address requires a separate official queue lookup. The bot rechecks group m
 Subscriptions send updated schedules. Group reminders use the existing group delivery channel.
 
 `UNOFFICIAL_FALLBACK_ENABLED=true` enables a supplemental board section if the official daily schedule request fails.
-Set `mirror_region` in private configuration only after matching the mirror's operator and territory.
+The installation matches a pinned public registry by operator name and official host. Only direct queue mappings qualify. Private installations can instead supply reviewed settings.
 The mirror cannot confirm an address assignment, cancellation, weekly forecast, or reminder.
 The supplemental section expires unless a fresh successful copy is available.
-Both switches default to false.
+Personal subscriptions default off. The scheduled installation enables the reserve policy by default. Set UNOFFICIAL_FALLBACK_ENABLED=false to disable registry discovery and the unofficial mirror.
 
 For local incident replay, save only the provider schedule fields `preset` and `fact`.
 Run `python -m scripts.replay_schedule snapshot.json QUEUE YYYY-MM-DD`.

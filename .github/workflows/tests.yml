@@ -2,6 +2,7 @@ name: Python tests
 on:
   push:
     paths:
+      - source_registry.py
       - optional_schedules.py
       - scripts/replay_schedule.py
       - bot.py

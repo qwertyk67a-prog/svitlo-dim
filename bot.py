@@ -1189,12 +1189,14 @@ async def once():
                             include_week=weekly_mode == "combined")
         mirror_enabled = os.getenv("UNOFFICIAL_FALLBACK_ENABLED") == "true"
         if ((config.get("official_reserve_url") or mirror_enabled)
-                and "provider_schedule" in source_problems and house_groups
-                and "address_lookup" not in source_problems):
+                and "provider_schedule" in source_problems and house_groups):
             try:
                 from optional_schedules import reserve_view
-                fallback = await reserve_view(config, house_groups, now, mirror_enabled)
+                from source_registry import reserve_settings
+                fallback = await reserve_view(reserve_settings(config), house_groups, now, mirror_enabled)
                 if fallback:
+                    if "address_lookup" in source_problems:
+                        fallback += "\nЧерга будинку за останньою успішною перевіркою."
                     board += "\n\n" + fallback
             except Exception as exc:
                 LOG.warning("Резервний графік недоступний: %s", type(exc).__name__)

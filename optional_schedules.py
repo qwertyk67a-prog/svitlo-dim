@@ -179,8 +179,11 @@ async def reserve_view(config, groups, now, mirror_enabled):
             for group in groups:
                 row = data[queue_label(group)]["today"]
                 day = datetime.fromisoformat(row["date"]).astimezone(KYIV).date()
-                if row["status"] != "ScheduleApplies" or day != now.date():
+                if day != now.date():
                     break
+                if row["status"] != "ScheduleApplies":
+                    # An explicitly unpublished or suspended schedule is an official answer.
+                    return ""
                 boundary = 0
                 spans = []
                 for slot in row["slots"]:
