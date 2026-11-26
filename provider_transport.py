@@ -10,6 +10,7 @@ import base64
 import logging
 import re
 import secrets
+import unicodedata
 from urllib.parse import unquote
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -97,16 +98,18 @@ def parse_fact(raw):
 def catalog_queue(value, config):
     if not config or not config.get("queue_catalog") or value in config["queue_catalog"]:
         return value
-    prefix = config.get("queue_display_prefix", "")
-    label = re.sub(r"^(?:черга|підчерга|група)\s*[:№]?\s*", "", value.strip(), flags=re.I)
-    if prefix and label.casefold().startswith(prefix.casefold()):
-        label = label[len(prefix):].strip()
-    if re.fullmatch(r"[0-9]+\.[0-9]+", label):
-        matches = [group for group in config["queue_catalog"]
-                   if group.removeprefix(prefix) == label]
-        if len(matches) == 1:
-            return matches[0]
-    return value
+    def spelling(text):
+        text = unicodedata.normalize("NFKC", text).casefold()
+        text = re.sub(r"[\s\u200b\ufeff]+", "", text)
+        return re.sub(r"^(?:підчерга|черга|група)(?:no|[:№])?", "", text)
+
+    label = spelling(value)
+    prefix = spelling(config.get("queue_display_prefix", ""))
+    matches = [group for group in config["queue_catalog"]
+               if spelling(group) == label
+               or (re.fullmatch(r"[0-9]+\.[0-9]+", label)
+                   and spelling(group).removeprefix(prefix) == label)]
+    return matches[0] if len(matches) == 1 else value
 
 
 def parse_homes(raw, config=None):
