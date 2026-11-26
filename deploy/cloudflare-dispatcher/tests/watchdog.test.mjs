@@ -84,7 +84,7 @@ test("two consecutive stale checks alert once, throttle hourly, then recover onc
   assert.equal(alerts.length, 0);
   assert.equal(await checkExternalHealth(cfg, mockFetch, T + 10 * 60000), "alert_sent");
   assert.equal(alerts.length, 1);
-  assert.match(alerts[0], /не вдається підтвердити/);
+  assert.match(alerts[0], /не вдається підтвердити/i);
   assert.equal(await checkExternalHealth(cfg, mockFetch, T + 15 * 60000), "alerted");
   assert.equal(alerts.length, 1);
   assert.equal(await checkExternalHealth(cfg, mockFetch, T + 72 * 60000), "alert_sent");
@@ -267,4 +267,18 @@ test("pin alarm requires two distinct failures and recovers exactly once", async
   await check();
   assert.equal(messages.length, 2);
   assert.equal(values.size, 0);
+});
+
+test("address lookup failure identifies a running schedule in administrator alert", async () => {
+  const kv = storage(), cfg = env(kv), messages = [];
+  const run = {...record(1), id: 5, conclusion: "failure"};
+  async function mock(url, options) {
+    if (url.endsWith("/jobs")) return response(200, {jobs:[{steps:[{name:"Address lookup failed", conclusion:"success"}]}]});
+    if (url.includes("api.github.com")) return response(200, {workflow_runs:[run]});
+    messages.push(JSON.parse(options.body).text);
+    return response(200, {ok:true});
+  }
+  await checkExternalHealth(cfg, mock, T);
+  await checkExternalHealth(cfg, mock, T + 300000);
+  assert.match(messages[0], /Оператор не підтвердив чергу будинку/);
 });

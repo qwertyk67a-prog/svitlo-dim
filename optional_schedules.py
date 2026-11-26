@@ -124,8 +124,13 @@ async def notify_subscriptions(homes, state, call, send, persist, primary, prima
                 if home[2] == primary:
                     groups = primary_groups
                 else:
-                    entry = await fetch_address_status(json.dumps(home[2], ensure_ascii=False))
-                    groups = verified_house_queues(entry.group_ids)
+                    try:
+                        entry = await fetch_address_status(json.dumps(home[2], ensure_ascii=False))
+                        groups = verified_house_queues(entry.group_ids)
+                    except Exception:
+                        # One unavailable house must not block delivery for other homes.
+                        views[key] = None
+                        continue
                 if not groups:
                     continue
                 if source is None:
@@ -136,6 +141,8 @@ async def notify_subscriptions(homes, state, call, send, persist, primary, prima
                 tentative = conditional or home[2] != primary
                 views[key] = build_board({}, source, groups, now, tentative, None, True,
                                          parse_verified, compact_daily_message, include_week=week)
+            if views[key] is None:
+                continue
             digest = hashlib.sha256(views[key].encode()).hexdigest()
             if choices[key] == digest:
                 continue

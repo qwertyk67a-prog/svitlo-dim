@@ -1151,7 +1151,10 @@ async def once():
     LOG.info("%s: %d; помилок доставки: %d",
              "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
              sent, len(problems))
-    if not dry_run and os.getenv("TELEGRAM_SCHEDULE_BOARD") == "true":
+    pin_enabled = os.getenv("TELEGRAM_SCHEDULE_BOARD") == "true"
+    now_enabled = os.getenv("NOW_COMMAND_ENABLED", str(pin_enabled).lower()) == "true"
+    menus_enabled = os.getenv("PERSONAL_SUBSCRIPTIONS_ENABLED") == "true"
+    if not dry_run and (pin_enabled or now_enabled or menus_enabled):
         from schedule_board import APIError, api, answer_commands, build_board, quiet, update_pin
         configured_chat = str(chat)
         def call(method, **params):
@@ -1197,14 +1200,15 @@ async def once():
                 LOG.warning("Резервний графік недоступний: %s", type(exc).__name__)
         persist()
         pin_result = "unknown"
-        for action in (update_pin, answer_commands):
+        actions = ([update_pin] if pin_enabled else []) + ([answer_commands] if now_enabled or menus_enabled else [])
+        for action in actions:
             try:
-                if action is answer_commands and os.getenv("PERSONAL_SUBSCRIPTIONS_ENABLED") == "true":
+                if action is answer_commands and menus_enabled:
                     from optional_schedules import notify_subscriptions, subscription_command, subscription_homes
                     homes = subscription_homes(config, chat)
                     def menu(msg):
                         subscription_command(msg, homes, state, call, send_board, persist)
-                    answer_commands(state, board, chat, call, send_board, persist, menu=menu)
+                    answer_commands(state, board, chat, call, send_board, persist, menu=menu, now_enabled=now_enabled)
                     await notify_subscriptions(homes, state, call, send_board, persist,
                                                config["address"], house_groups if house is not None else None,
                                                source, now, uncertain_gpv, week=weekly_mode == "combined")
@@ -1222,6 +1226,9 @@ async def once():
         if output:
             with open(output, "a", encoding="utf-8") as report:
                 print(f"pin_health={pin_result}", file=report)
+    if "address_lookup" in source_problems and os.getenv("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as report:
+            print("address_lookup=failed", file=report)
     if problems:
         raise RuntimeError(f"Помилки Telegram: {len(problems)}; успішні події збережено")
     if source_problems:

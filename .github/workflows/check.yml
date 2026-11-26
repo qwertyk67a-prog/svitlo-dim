@@ -75,7 +75,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WEEKLY_SCHEDULE_MODE: ${{ vars.WEEKLY_SCHEDULE_MODE || 'off' }}
-          TELEGRAM_SCHEDULE_BOARD: "true"
+          TELEGRAM_SCHEDULE_BOARD: ${{ vars.TELEGRAM_SCHEDULE_BOARD || 'true' }}
+          NOW_COMMAND_ENABLED: ${{ vars.NOW_COMMAND_ENABLED || 'true' }}
           PERSONAL_SUBSCRIPTIONS_ENABLED: ${{ vars.PERSONAL_SUBSCRIPTIONS_ENABLED || 'false' }}
           UNOFFICIAL_FALLBACK_ENABLED: ${{ vars.UNOFFICIAL_FALLBACK_ENABLED || 'false' }}
           REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '15' }}
@@ -83,6 +84,9 @@ jobs:
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           STATE_PATH: bot_state.json
         run: python bot.py --once
+      - name: Address lookup failed
+        if: always() && steps.gate.outputs.active == 'true' && steps.notify.outputs.address_lookup == 'failed'
+        run: echo "::warning::The operator did not confirm the address assignment"
       - name: Schedule pin confirmed
         if: always() && steps.gate.outputs.active == 'true' && steps.notify.outputs.pin_health == 'ok'
         run: echo "Telegram confirmed the schedule pin"

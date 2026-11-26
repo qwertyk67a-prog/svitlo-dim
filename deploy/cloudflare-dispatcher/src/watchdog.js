@@ -152,13 +152,27 @@ export async function checkExternalHealth(env, fetchFn = fetch, nowMs = Date.now
     return "alerted";
   }
 
-  await sendTelegram(
-    env,
-    "⚠️ Контроль запусків: не вдається підтвердити роботу автоматичних перевірок. " +
-    "Немає недавнього успішного запуску або GitHub API недоступний. " +
-    "Це НЕ підтверджує відключення електрики. Перевірте GitHub Actions.",
-    fetchFn
-  );
+  let detail = "Не вдається підтвердити недавній успішний запуск.";
+  try {
+    const base = "https://api.github.com/repos/" + repository + "/actions";
+    const history = await readGitHub(base + "/workflows/check.yml/runs?per_page=5&branch=main",
+      env.GH_WORKFLOW_TOKEN, fetchFn);
+    const failed = history?.workflow_runs?.find(run => run.status === "completed");
+    const age = nowMs - Date.parse(failed?.created_at);
+    if (failed?.conclusion === "failure" && failed.head_branch === "main" &&
+        Number.isSafeInteger(failed.id) && failed.id > 0 && age >= 0 && age <= HEALTH_WINDOW_MS) {
+      detail = "Запуски тривають. Остання завершена перевірка має помилку.";
+      const report = await readGitHub(base + "/runs/" + failed.id + "/jobs", env.GH_WORKFLOW_TOKEN, fetchFn);
+      if (report?.jobs?.some(job => job.steps?.some(step =>
+          step.name === "Address lookup failed" && step.conclusion === "success"))) {
+        detail += " Оператор не підтвердив чергу будинку.";
+      }
+    }
+  } catch {
+    // The administrator still needs the original alert if GitHub cannot provide details.
+  }
+  await sendTelegram(env, "⚠️ Контроль запусків: " + detail +
+    " Перевірте GitHub Actions. Стан електропостачання будинку невідомий.", fetchFn);
   await env.WATCHDOG_KV.put(
     key, JSON.stringify(record(
       "alerted",

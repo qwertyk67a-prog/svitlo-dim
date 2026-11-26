@@ -78,7 +78,7 @@ The district and quarter are optional. Only city, street and house are sent
 to the provider address API.
 
 Repository Secrets: BOT_ENABLED=true enables monitoring. Existing installations also accept previous repository variables.
-REMINDER_MINUTES=0 disables reminders by default.
+REMINDER_MINUTES=0 disables reminders.
 ANNOUNCEMENTS_ENABLED=true enables official regional announcements.
 
 ## Setup
@@ -167,6 +167,7 @@ The private watchdog reports two consecutive failed schedule-pin checks separate
 
 The scheduled installation uses the Actions variable `REMINDER_MINUTES` (15 when unset).
 Set it to 0 to disable. The former Actions secret of the same name no longer controls this workflow.
+The pin and /now can be switched independently through TELEGRAM_SCHEDULE_BOARD and NOW_COMMAND_ENABLED (both default on in Actions).
 Local executions still use the environment setting and default to 0.
 
 `PERSONAL_SUBSCRIPTIONS_ENABLED=true` enables the private Telegram command /subscriptions.

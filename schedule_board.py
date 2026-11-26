@@ -174,7 +174,7 @@ def update_pin(state, text, chat, call, send, persist):
         persist()
 
 
-def answer_commands(state, text, chat, call, send, persist, menu=None):
+def answer_commands(state, text, chat, call, send, persist, menu=None, now_enabled=True):
     updates = call("getUpdates", offset=state.get("board:offset", 0), timeout=0,
                    limit=100, allowed_updates=["message", "channel_post"])
     for item in updates:
@@ -183,6 +183,8 @@ def answer_commands(state, text, chat, call, send, persist, menu=None):
             menu(msg)
         dest = msg.get("chat", {})
         command = re.fullmatch(r"/now(?:@(\w+))?", (msg.get("text") or "").strip(), re.I)
+        if not now_enabled:
+            command = None
         if command and command[1]:
             username = state.get("board:username")
             if not username or username.casefold() != command[1].casefold():
