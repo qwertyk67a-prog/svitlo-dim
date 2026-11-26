@@ -95,7 +95,7 @@ def parse_fact(raw):
 
 
 def catalog_queue(value, config):
-    if not config or value in config["queue_catalog"]:
+    if not config or not config.get("queue_catalog") or value in config["queue_catalog"]:
         return value
     prefix = config.get("queue_display_prefix", "")
     label = re.sub(r"^(?:черга|підчерга|група)\s*[:№]?\s*", "", value.strip(), flags=re.I)
