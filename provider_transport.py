@@ -94,7 +94,22 @@ def parse_fact(raw):
     return SimpleNamespace(days=days, update=raw.get("update"))
 
 
-def parse_homes(raw):
+def catalog_queue(value, config):
+    if not config or value in config["queue_catalog"]:
+        return value
+    prefix = config.get("queue_display_prefix", "")
+    label = re.sub(r"^(?:черга|підчерга|група)\s*[:№]?\s*", "", value.strip(), flags=re.I)
+    if prefix and label.casefold().startswith(prefix.casefold()):
+        label = label[len(prefix):].strip()
+    if re.fullmatch(r"[0-9]+\.[0-9]+", label):
+        matches = [group for group in config["queue_catalog"]
+                   if group.removeprefix(prefix) == label]
+        if len(matches) == 1:
+            return matches[0]
+    return value
+
+
+def parse_homes(raw, config=None):
     if not isinstance(raw, dict) or not isinstance(raw.get("data"), (dict, list)):
         raise RuntimeError("Invalid provider address directory")
     data = raw["data"]
@@ -121,8 +136,10 @@ def parse_homes(raw):
                 entries = [entries]
             if isinstance(entries, list):
                 for group in entries:
-                    if isinstance(group, str) and group not in groups:
-                        groups.append(group)
+                    if isinstance(group, str):
+                        group = catalog_queue(group, config)
+                        if group not in groups:
+                            groups.append(group)
         primary = next(
             (row for row in records if row.get("sub_type") or row.get("start_date")),
             records[0],
@@ -358,7 +375,7 @@ async def get_homes(config, city, street):
         [("city", city), ("street", street)],
         update_fact="01.01.2000 00:00",
     ))
-    return parse_homes(raw)
+    return parse_homes(raw, config)
 
 
 async def get_schedule(config):
