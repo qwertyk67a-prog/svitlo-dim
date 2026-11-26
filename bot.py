@@ -828,6 +828,7 @@ async def once():
 
     # Queue assignments come only from the official address response.
     house = None
+    rejected_groups = ()
     house_groups = None
     queue_change = None
     regional_scope = None
@@ -843,6 +844,7 @@ async def once():
             try:
                 house_groups = verified_house_queues(identifiers)
             except ValueError:
+                rejected_groups = identifiers or ()
                 shapes = []
                 for item in (identifiers or ()):
                     # No private IDs or free-form directory text in public logs.
@@ -953,6 +955,11 @@ async def once():
         LOG.error("Графік оператор недоступний: %s", type(exc).__name__)
         source_problems.append("provider_schedule")
         source, groups = None, []
+
+    if rejected_groups and source and source.fact:
+        today_rows = source.fact.days.get(str(int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())), {})
+        LOG.warning("Rejected address queues all in official daily table: %s",
+                    all(group in today_rows for group in rejected_groups))
 
     # If an official emergency/GAV regime remains active, the daily GPV
     # cannot be presented as guaranteed operational at this moment.
