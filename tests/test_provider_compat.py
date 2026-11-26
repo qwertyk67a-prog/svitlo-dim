@@ -497,7 +497,7 @@ def test_single_queue_in_address_directory(field):
     assert get_house_entry(response, "12Б").group_ids == ["GPV3.1"]
 
 
-@pytest.mark.parametrize("field", ["3.1", "Черга 3.1", " GPV3.1 ", "підчерга № 3.1"])
+@pytest.mark.parametrize("field", ["3.1", "Черга 3.1", " GPV3.1 ", "підчерга № 3.1", "gpv3 . 1", "GPV\u200b3.1"])
 def test_directory_matches_complete_catalog_subgroup(field):
     raw = {"data": {"12/Б": {"sub_type_reason": [field]}}}
     assert get_house_entry(parse_homes(raw, TEST_CONFIG), "12Б").group_ids == ["GPV3.1"]
