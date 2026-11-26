@@ -51,6 +51,60 @@ def compact_daily_message(day, spans, *, group=None, conditional=False):
     return "\n".join(lines)
 
 
+def resident_plan(state, source, group, window, now, conditional):
+    """Use the last published spans as the baseline for both Telegram views."""
+    old = state.get("board:daily", {})
+    previous = old.get("days", {}) if old.get("group") == group else {}
+    days = {}
+    changed = False
+    tables = {datetime.fromtimestamp(int(stamp), KYIV).date(): rows
+              for stamp, rows in (source.fact.days.items() if source and source.fact else ())}
+    start, end = window
+    for day in (now.date(), now.date() + timedelta(days=1)):
+        key = day.isoformat()
+        saved = previous.get(key)
+        if saved is None and not old:
+            legacy = state.get(f"{key}:{group}")
+            if isinstance(legacy, dict) and "spans" in legacy:
+                saved = [[a, b, "maybe" if legacy.get("conditional") else mode]
+                         for a, b, mode in legacy["spans"]]
+        rows = tables.get(day, {}).get(group)
+        spans = parse_verified(rows, source.preset.time_zone) if rows is not None else None
+        midnight = datetime.combine(day, datetime.min.time(), KYIV)
+        tomorrow = midnight + timedelta(days=1)
+        address_applies = start and end and end > now and start < end and start < tomorrow and end > midnight
+        if spans is None:
+            if saved is None and not address_applies:
+                continue
+            if not address_applies:
+                days[key] = saved
+                continue
+            spans = list(saved or [])
+        elif conditional:
+            spans = [(a, b, "maybe") for a, b, mode in spans]
+        if address_applies:
+            a = max(0, int((start - midnight).total_seconds() // 60))
+            b = min(1440, int((end - midnight).total_seconds() // 60))
+            spans = sorted([slot for slot in spans if slot[1] <= a or slot[0] >= b]
+                           + [(a, b, "off")])
+        old_sig = upcoming_signature(day, [tuple(slot) for slot in saved or ()], now)
+        new_sig = upcoming_signature(day, [tuple(slot) for slot in spans], now)
+        if old_sig == new_sig and saved is not None:
+            days[key] = saved
+        else:
+            days[key] = [list(slot) for slot in upcoming_spans(day, spans, now)]
+            changed |= old_sig != new_sig
+    record = {"group": group, "days": days}
+    blocks = []
+    for key, spans in days.items():
+        lines = [datetime.fromisoformat(key).strftime("%d.%m.%Y")]
+        for a, b, mode in spans:
+            prefix = "Можливе відключення " if mode == "maybe" else ""
+            lines.append(f"{prefix}{clock(a)}–{clock(b)}")
+        blocks.append("\n".join(lines if spans else lines + ["Відключень за графіком немає"]))
+    return record, "\n\n".join(blocks), changed
+
+
 def address_window(record):
     from alerts import exact_provider_time
     if not isinstance(record, dict) or record.get("status") != "active":
@@ -785,9 +839,13 @@ async def once():
             from event_scope import house_scope_from_secret
             regional_scope = house_scope_from_secret(private_address)
             house = await fetch_address_status(private_address)
-            house_groups = verified_house_queues(
-                house.group_ids if house is not None else None
-            )
+            identifiers = house.group_ids if house is not None else None
+            try:
+                house_groups = verified_house_queues(identifiers)
+            except ValueError:
+                LOG.warning("Address matched; queue validation: %s",
+                            "unrecognized" if identifiers else "missing")
+                raise
             # One checkpoint per hour is sufficient to establish a bounded
             # fallback age without committing new state every five minutes.
             verified_hour = now.replace(minute=0, second=0, microsecond=0).isoformat()
@@ -827,6 +885,7 @@ async def once():
         return
 
 
+    address_ok = "address_lookup" not in source_problems
     pending = []
     seq = 0
 
@@ -837,7 +896,7 @@ async def once():
 
     # Announce queue additions/removals exactly once; never pause the house.
     # A failed announcement leaves the old snapshot for the next check.
-    if house_groups is not None:
+    if address_ok and house_groups is not None:
         if queue_change:
             enqueue(1, "house:groups", house_snapshot, queue_change, "queue_change")
         elif state.get("house:groups") != house_snapshot:
@@ -845,7 +904,7 @@ async def once():
             persist()
 
     # Official emergency and GAV announcements are prioritized.
-    if os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
+    if address_ok and os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
         try:
             from alerts import fetch_official_page, region_candidates
             events = region_candidates(
@@ -861,7 +920,9 @@ async def once():
             LOG.warning("Офіційні оголошення недоступні: %s", type(exc).__name__)
             source_problems.append("official_feed")
 
-    if house is not None:
+    shared_daily = COMPACT_DAILY_SCHEDULE and weekly_mode != "combined" and len(house_groups or ()) == 1
+    window = address_window(state.get("address:last_outage"))
+    if address_ok and house is not None:
         try:
             from alerts import address_decision
             for _channel, key, value, message in address_decision(
@@ -869,6 +930,10 @@ async def once():
                 if key == "address:groups":
                     # Only house_queue_transition owns this state key.
                     continue
+                if shared_daily and key == "address:last_outage":
+                    window = address_window(value)
+                    if all(window) or value.get("status") == "expired":
+                        message = None
                 enqueue(4 if COMPACT_DAILY_SCHEDULE else 1, key, value, message, "address")
         except Exception as exc:
             LOG.warning("Адресні події недоступні: %s", type(exc).__name__)
@@ -902,7 +967,7 @@ async def once():
             emergency_states[key] = value.get("status")
     uncertain_gpv = any(x == "active" for x in emergency_states.values())
 
-    if source:
+    if source and address_ok:
         # Absence of an unpublished daily table is normal. A PUBLISHED
         # table containing unknown or incomplete slots is not: fail visibly
         # rather than silently treating a broken table as "nothing changed".
@@ -927,7 +992,7 @@ async def once():
                     source, group, today, state, weekly_mode == "separate"):
                 if kind in ("week", "week_cancel") and weekly_mode != "separate":
                     continue
-                if weekly_mode == "combined" and kind in ("day", "day_cancel"):
+                if (shared_daily or weekly_mode == "combined") and kind in ("day", "day_cancel"):
                     continue
                 if kind == "week":
                     payload = (state.get("board:weekly_activation"), payload)
@@ -1075,7 +1140,20 @@ async def once():
                 continue
             for key, message, deadline in due_reminders(
                     source, group, datetime.now(KYIV), leads, state, parse_verified):
+                if shared_daily and all(window):
+                    day_key, _, suffix = key.removeprefix("reminder:").partition(":")
+                    minute = suffix.rsplit(":", 2)[1]
+                    planned = datetime.fromisoformat(day_key).replace(tzinfo=KYIV) + timedelta(minutes=int(minute))
+                    if window[0] < planned < window[1]:
+                        continue
                 enqueue(5, key, {"sent": True}, message, "reminder", deadline)
+
+    shared_text = ""
+    if shared_daily and address_ok:
+        record, shared_text, changed = resident_plan(
+            state, source, house_groups[0], window, now, uncertain_gpv)
+        if record != state.get("board:daily"):
+            enqueue(2, "board:daily", record, shared_text if changed else None, "resident_plan")
 
     # Preserve order among official announcements (e.g. start then cancel).
     # A failed send must not advance the official feed checkpoint.
@@ -1184,10 +1262,14 @@ async def once():
                 state.pop(name, None)
             state["board:owner"] = owner
         cache = state.setdefault("board:cache", {})
-        board = build_board(cache, source, house_groups, now, uncertain_gpv, house,
+        if not address_ok and state.get("board:daily"):
+            old_group = state["board:daily"]["group"]
+            _, shared_text, _ = resident_plan(state, None, old_group, (None, None), now, False)
+        board = shared_text if shared_daily or shared_text else build_board(cache, source, house_groups, now, uncertain_gpv, house,
                             "address_lookup" not in source_problems, parse_verified, compact_daily_message,
                             include_week=weekly_mode == "combined")
         mirror_enabled = os.getenv("UNOFFICIAL_FALLBACK_ENABLED") == "true"
+        pin_text = board
         if ((config.get("official_reserve_url") or mirror_enabled)
                 and "provider_schedule" in source_problems and house_groups):
             try:
@@ -1198,11 +1280,14 @@ async def once():
                     if "address_lookup" in source_problems:
                         fallback += "\nЧерга будинку за останньою успішною перевіркою."
                     board += "\n\n" + fallback
+                    if not shared_daily:
+                        pin_text = board
             except Exception as exc:
                 LOG.warning("Резервний графік недоступний: %s", type(exc).__name__)
         persist()
         pin_result = "unknown"
-        actions = ([update_pin] if pin_enabled else []) + ([answer_commands] if now_enabled or menus_enabled else [])
+        actions = ([update_pin] if pin_enabled and address_ok and pin_text and "resident_plan" not in problems else []) + ([answer_commands] if now_enabled or menus_enabled else [])
+        board = board or "Підтверджений графік недоступний"
         for action in actions:
             try:
                 if action is answer_commands and menus_enabled:
@@ -1215,7 +1300,7 @@ async def once():
                                                config["address"], house_groups if house is not None else None,
                                                source, now, uncertain_gpv, week=weekly_mode)
                 else:
-                    action(state, board, chat, call, send_board, persist)
+                    action(state, pin_text if action is update_pin else board, chat, call, send_board, persist)
                 if action is update_pin:
                     pin_result = "ok"
             except RuntimeError as exc:

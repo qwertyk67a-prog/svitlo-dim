@@ -377,12 +377,10 @@ def test_address_api_failure_uses_last_verified_queues(tmp_path, monkeypatch):
     messages = []
     monkeypatch.setattr(bot, "telegram_send",
                         lambda _t, _c, msg, deadline=None: messages.append(msg))
-    # The cache preserves a valid notification, but the failed address
-    # verification MUST make the workflow fail visibly.
     with pytest.raises(RuntimeError, match="address_lookup"):
         asyncio.run(bot.once())
     assert checked == [("GPV3.1",)]
-    assert len(messages) == 1
+    assert messages == []
 
 
 def test_address_failure_without_cache_does_not_invent_group(tmp_path, monkeypatch):
@@ -485,7 +483,7 @@ def test_official_feed_error_marks_action_failed_after_schedule_delivery(
     assert messages  # Valid daily GPV was not blocked by official feed outage.
 
 
-def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatch):
+def test_group_stays_silent_while_address_api_unavailable(tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     setup(monkeypatch,state_file)
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
@@ -508,8 +506,7 @@ def test_official_feed_runs_even_if_address_api_unavailable(tmp_path, monkeypatc
                         lambda _t,_c,txt,deadline=None: messages.append(txt))
     with pytest.raises(RuntimeError, match="address_lookup"):
         asyncio.run(bot.once())
-    assert len(messages)==1
-    assert "екстрені" in messages[0].casefold()
+    assert messages == []
 
 
 def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypatch):
@@ -707,8 +704,8 @@ def test_queue_cache_after_failed_queue_change(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="address_lookup"):
         asyncio.run(bot.once())
     assert checked == [("GPV3.1",), ("GPV3.1",)]
-    assert len(sent) == 1
-    assert bot.state_read(path)["house:groups"] == ["GPV3.1"]
+    assert sent == []
+    assert bot.state_read(path)["house:groups"] == ["GPV2.1"]
 
 
 def test_compact_daily_new_cancel_resumed_and_unchanged(tmp_path, monkeypatch):
@@ -721,9 +718,9 @@ def test_compact_daily_new_cancel_resumed_and_unchanged(tmp_path, monkeypatch):
     asyncio.run(bot.once())
     asyncio.run(bot.once())
     assert sent == [
-        "19.11.2026\nВідключення:\n20:00–24:00",
-        "19.11.2026\nВідключення за графіком скасовано",
-        "19.11.2026\nВідключення:\n20:00–24:00",
+        "19.11.2026\n20:00–24:00",
+        "19.11.2026\nВідключень за графіком немає",
+        "19.11.2026\n20:00–24:00",
     ]
 
 
@@ -823,14 +820,14 @@ def test_address_and_schedule_share_only_equivalent_visible_intervals(tmp_path, 
     current["source"]["3"] = "no"
     asyncio.run(bot.once())
     assert len(sent) == 1
-    heading = "Відключення:" if schedule_first else "За повідомленням оператора для будинку:"
-    assert sent[0].startswith(f"19.11.2026\n{heading}\n")
+    start = "20:00" if schedule_first else "20:15"
+    assert sent[0] == f"19.11.2026\n{start}–24:00"
     entry.start_date = "19.11.2026 20:22"
     asyncio.run(bot.once())
     assert len(sent) == 1
     entry.end_date = "19.11.2026 23:30"
     asyncio.run(bot.once())
-    assert sent[-1] == "19.11.2026\nЗа повідомленням оператора для будинку:\n20:22–23:30"
+    assert sent[-1] == "19.11.2026\n20:22–23:30"
     assert len(sent) == 2
 
 
@@ -845,7 +842,7 @@ def test_status_changes_without_slot_changes_update_delivered_message(tmp_path, 
         asyncio.run(bot.once())
         asyncio.run(bot.once())
     assert [msg.splitlines()[1] for msg in sent] == [
-        "Відключення:", "Можливі відключення:", "Відключення:"]
+        "20:00–24:00", "Можливе відключення 20:00–24:00", "20:00–24:00"]
 
 
 def test_retired_queue_in_checkpoint_cannot_block_new_assignment():
@@ -883,9 +880,7 @@ def test_schedule_cancellation_keeps_confirmed_address_outage_visible(tmp_path, 
     asyncio.run(bot.once())
     current["source"]["3"] = "yes"
     asyncio.run(bot.once())
-    assert sent[-1].splitlines() == [
-        "19.11.2026", "Відключення за графіком скасовано",
-        "За адресою вказано відключення до 23:30"]
+    assert sent == ["19.11.2026\n20:10–23:30"]
 
 
 
@@ -924,12 +919,13 @@ def test_later_address_correction_preserves_evening_outage(tmp_path, monkeypatch
     asyncio.run(bot.once())
     slots["2"] = "no"
     asyncio.run(bot.once())
-    assert sent[-1].endswith("11:30–18:30\n22:00–24:00")
+    assert sent == ["24.11.2026\n12:05–15:30\n22:00–24:00"]
     count = len(sent)
     entry.end_date = "24.11.2026 18:30"
     asyncio.run(bot.once())
-    assert len(sent) == count
+    assert len(sent) == count + 1
+    assert "12:05–18:30" in sent[-1]
     entry.end_date = "24.11.2026 19:00"
     asyncio.run(bot.once())
-    assert len(sent) == count + 1
+    assert len(sent) == count + 2
     assert "12:05–19:00" in sent[-1] and "22:00–24:00" in sent[-1]

@@ -489,3 +489,9 @@ def test_source_link_never_exposes_private_request_path_or_query(monkeypatch):
     config["public_site_url"] = "https://grid.example.invalid/news"
     monkeypatch.setenv("POWER_CONFIG_JSON", json.dumps(config))
     assert official_site() == config["public_site_url"]
+
+
+@pytest.mark.parametrize("field", ["GPV3.1", ["GPV3.1"]])
+def test_single_queue_in_address_directory(field):
+    response = parse_homes({"data": {"12/Б": {"sub_type_reason": field}}})
+    assert get_house_entry(response, "12Б").group_ids == ["GPV3.1"]
