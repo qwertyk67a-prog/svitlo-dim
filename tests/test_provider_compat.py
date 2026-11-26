@@ -495,3 +495,15 @@ def test_source_link_never_exposes_private_request_path_or_query(monkeypatch):
 def test_single_queue_in_address_directory(field):
     response = parse_homes({"data": {"12/Б": {"sub_type_reason": field}}})
     assert get_house_entry(response, "12Б").group_ids == ["GPV3.1"]
+
+
+@pytest.mark.parametrize("field", ["3.1", "Черга 3.1", " GPV3.1 ", "підчерга № 3.1"])
+def test_directory_matches_complete_catalog_subgroup(field):
+    raw = {"data": {"12/Б": {"sub_type_reason": [field]}}}
+    assert get_house_entry(parse_homes(raw, TEST_CONFIG), "12Б").group_ids == ["GPV3.1"]
+
+
+@pytest.mark.parametrize("field", ["3", "3.10", "3.1/4.1", "невідомо"])
+def test_directory_preserves_unrecognized_labels_for_rejection(field):
+    raw = {"data": {"12/Б": {"sub_type_reason": [field]}}}
+    assert get_house_entry(parse_homes(raw, TEST_CONFIG), "12Б").group_ids == [field]
