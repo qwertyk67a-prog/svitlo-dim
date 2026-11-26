@@ -839,9 +839,13 @@ async def once():
             from event_scope import house_scope_from_secret
             regional_scope = house_scope_from_secret(private_address)
             house = await fetch_address_status(private_address)
-            house_groups = verified_house_queues(
-                house.group_ids if house is not None else None
-            )
+            identifiers = house.group_ids if house is not None else None
+            try:
+                house_groups = verified_house_queues(identifiers)
+            except ValueError:
+                LOG.warning("Address matched; queue validation: %s",
+                            "unrecognized" if identifiers else "missing")
+                raise
             # One checkpoint per hour is sufficient to establish a bounded
             # fallback age without committing new state every five minutes.
             verified_hour = now.replace(minute=0, second=0, microsecond=0).isoformat()
