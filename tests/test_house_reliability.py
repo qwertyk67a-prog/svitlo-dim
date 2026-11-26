@@ -823,13 +823,14 @@ def test_address_and_schedule_share_only_equivalent_visible_intervals(tmp_path, 
     current["source"]["3"] = "no"
     asyncio.run(bot.once())
     assert len(sent) == 1
-    assert sent[0].startswith("19.11.2026\nВідключення:\n")
+    heading = "Відключення:" if schedule_first else "За повідомленням оператора для будинку:"
+    assert sent[0].startswith(f"19.11.2026\n{heading}\n")
     entry.start_date = "19.11.2026 20:22"
     asyncio.run(bot.once())
     assert len(sent) == 1
     entry.end_date = "19.11.2026 23:30"
     asyncio.run(bot.once())
-    assert sent[-1] == "19.11.2026\nВідключення:\n20:22–23:30"
+    assert sent[-1] == "19.11.2026\nЗа повідомленням оператора для будинку:\n20:22–23:30"
     assert len(sent) == 2
 
 

@@ -2,6 +2,8 @@ name: Python tests
 on:
   push:
     paths:
+      - optional_schedules.py
+      - scripts/replay_schedule.py
       - bot.py
       - schedule_board.py
       - power_config.py

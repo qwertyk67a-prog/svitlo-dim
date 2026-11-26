@@ -114,7 +114,7 @@ def compact_address_message(value, now):
         detail = "З " + beginning + ", час завершення невідомий"
     else:
         detail = "Час не вказано"
-    return day.strftime("%d.%m.%Y") + "\nВідключення:\n" + detail
+    return day.strftime("%d.%m.%Y") + "\nЗа повідомленням оператора для будинку:\n" + detail
 
 
 def address_notice_with_schedule(value, now, source, groups, conditional):
@@ -135,7 +135,11 @@ def address_notice_with_schedule(value, now, source, groups, conditional):
             if later:
                 section = compact_daily_message(day, later, group=group if len(groups) > 1 else None,
                                                 conditional=conditional)
-                message += "\n\nДалі за графіком:\n" + section
+                header, _, body = section.partition("\n")
+                body = body.removeprefix("Відключення:\n")
+                if len(groups) > 1:
+                    body = header.partition(" · ")[2] + "\n" + body
+                message += "\n\nДалі за графіком:\n" + body
     return message
 
 
@@ -757,6 +761,7 @@ async def once():
     now = datetime.now(KYIV)
     today = now.date()
     leads = parse_reminder_minutes(os.getenv("REMINDER_MINUTES", "0"))
+    LOG.info("Нагадування, хв: %s", list(leads))
     trim_state(state, today)
     if weekly_mode != state.get("board:weekly_mode", "off"):
         state["board:weekly_mode"] = weekly_mode
@@ -1179,11 +1184,32 @@ async def once():
         board = build_board(cache, source, house_groups, now, uncertain_gpv, house,
                             "address_lookup" not in source_problems, parse_verified, compact_daily_message,
                             include_week=weekly_mode == "combined")
+        mirror_enabled = os.getenv("UNOFFICIAL_FALLBACK_ENABLED") == "true"
+        if ((config.get("official_reserve_url") or mirror_enabled)
+                and "provider_schedule" in source_problems and house_groups
+                and "address_lookup" not in source_problems):
+            try:
+                from optional_schedules import reserve_view
+                fallback = await reserve_view(config, house_groups, now, mirror_enabled)
+                if fallback:
+                    board += "\n\n" + fallback
+            except Exception as exc:
+                LOG.warning("Резервний графік недоступний: %s", type(exc).__name__)
         persist()
         pin_result = "unknown"
         for action in (update_pin, answer_commands):
             try:
-                action(state, board, chat, call, send_board, persist)
+                if action is answer_commands and os.getenv("PERSONAL_SUBSCRIPTIONS_ENABLED") == "true":
+                    from optional_schedules import notify_subscriptions, subscription_command, subscription_homes
+                    homes = subscription_homes(config, chat)
+                    def menu(msg):
+                        subscription_command(msg, homes, state, call, send_board, persist)
+                    answer_commands(state, board, chat, call, send_board, persist, menu=menu)
+                    await notify_subscriptions(homes, state, call, send_board, persist,
+                                               config["address"], house_groups if house is not None else None,
+                                               source, now, uncertain_gpv, week=weekly_mode == "combined")
+                else:
+                    action(state, board, chat, call, send_board, persist)
                 if action is update_pin:
                     pin_result = "ok"
             except RuntimeError as exc:

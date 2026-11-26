@@ -162,3 +162,28 @@ The regular monitoring job reads commands, so replies may take one polling
 cycle. Missing or incomplete source data are labelled on the saved schedule.
 
 The private watchdog reports two consecutive failed schedule-pin checks separately from runner health. It reports recovery after a confirmed pin. Missing observations do not prove failure or recovery.
+
+### House delivery settings
+
+The scheduled installation uses the Actions variable `REMINDER_MINUTES` (15 when unset).
+Set it to 0 to disable. The former Actions secret of the same name no longer controls this workflow.
+Local executions still use the environment setting and default to 0.
+
+`PERSONAL_SUBSCRIPTIONS_ENABLED=true` enables the private Telegram command /subscriptions.
+Default off. Residents can subscribe to a house after verification against that house's Telegram group.
+Additional houses of this same operator can be listed in the private configuration under
+`subscription_homes` as objects with `label`, `chat` (the house group ID), and `address`.
+Use only houses covered by the installation's configured emergency-announcement territory.
+Each address requires a separate official queue lookup. The bot rechecks group membership before personal delivery.
+Subscriptions send updated schedules. Group reminders use the existing group delivery channel.
+
+`UNOFFICIAL_FALLBACK_ENABLED=true` enables a supplemental board section if the official daily schedule request fails.
+Set `mirror_region` in private configuration only after matching the mirror's operator and territory.
+The mirror cannot confirm an address assignment, cancellation, weekly forecast, or reminder.
+The supplemental section expires unless a fresh successful copy is available.
+Both switches default to false.
+
+For local incident replay, save only the provider schedule fields `preset` and `fact`.
+Run `python -m scripts.replay_schedule snapshot.json QUEUE YYYY-MM-DD`.
+An optional `official_reserve_url` selects the verified YASNO planned-outages endpoint for the same distribution operator.
+This official daily reserve always runs before an enabled unofficial mirror.

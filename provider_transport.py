@@ -316,7 +316,14 @@ async def ajax_post(config, form):
         result = await _request(config, form, cookies=cookies, csrf=csrf)
     except ProviderRateLimit:
         raise
-    except Exception:
+    except Exception as exc:
+        # Only log known transport categories. Request text can contain private data.
+        category = str(exc)
+        safe = {"Provider API returned invalid JSON", "Provider API returned invalid data",
+                "Official source did not provide a CSRF token", "Official source rejected CSRF refresh"}
+        if category not in safe and not re.fullmatch(r"Provider API HTTP [1-5][0-9]{2}", category):
+            category = type(exc).__name__
+        LOG.warning("Provider response unavailable: %s", category)
         raise RuntimeError("Official provider request unavailable") from None
     _BROWSER_SESSION_CACHE[key] = (
         time.monotonic() + _BROWSER_SESSION_TTL, dict(cookies), csrf,
