@@ -1141,7 +1141,8 @@ async def once():
             for key, message, deadline in due_reminders(
                     source, group, datetime.now(KYIV), leads, state, parse_verified):
                 if shared_daily and all(window):
-                    day_key, _, minute, _ = key.removeprefix("reminder:").split(":")
+                    day_key, _, suffix = key.removeprefix("reminder:").partition(":")
+                    minute = suffix.rsplit(":", 2)[1]
                     planned = datetime.fromisoformat(day_key).replace(tzinfo=KYIV) + timedelta(minutes=int(minute))
                     if window[0] < planned < window[1]:
                         continue
