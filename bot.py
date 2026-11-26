@@ -843,8 +843,13 @@ async def once():
             try:
                 house_groups = verified_house_queues(identifiers)
             except ValueError:
-                LOG.warning("Address matched; queue validation: %s",
-                            "unrecognized" if identifiers else "missing")
+                shapes = []
+                for item in (identifiers or ()):
+                    # No private IDs or free-form directory text in public logs.
+                    words = re.findall(r"\d+|[^\W\d_]+|[^\w\s]", str(item).casefold())
+                    allowed = {"gpv", "гпв", "черга", "група", "підчерга", ".", "-", "/", ":", ",", "(", ")"}
+                    shapes.append(" ".join("N" if w.isdecimal() else w if w in allowed else "?" for w in words)[:60])
+                LOG.warning("Address matched; queue validation: %s", shapes or "missing")
                 raise
             # One checkpoint per hour is sufficient to establish a bounded
             # fallback age without committing new state every five minutes.
