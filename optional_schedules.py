@@ -79,17 +79,19 @@ def is_member(call, chat, user):
         result["status"] == "restricted" and result.get("is_member") is True)
 
 
-def subscription_command(msg, homes, state, call, send, persist):
+def subscription_command(msg, homes, state, call, send, persist, callback=None):
     dest = msg.get("chat", {})
     if dest.get("type") != "private":
         return
     user = str(dest.get("id"))
-    command = (msg.get("text") or "").strip()
+    if callback and str(callback.get("from", {}).get("id")) != user:
+        return
+    command = (callback.get("data", "") if callback else msg.get("text") or "").strip()
     if command != "/subscriptions" and not command.startswith(("/sub_", "/unsub_")):
         return
     records = state.setdefault("subscriptions", {})
     choices = records.get(user, {})
-    lines = ["Особисті підписки"]
+    buttons = []
     for key, (label, chat, _) in homes.items():
         if not is_member(call, chat, user):
             continue
@@ -97,18 +99,36 @@ def subscription_command(msg, homes, state, call, send, persist):
             choices.setdefault(key, "")
         if command == "/unsub_" + key:
             choices.pop(key, None)
-        action = ("Вимкнути /unsub_" if key in choices else "Увімкнути /sub_")
-        lines.append(html.escape(label) + " · " + action + key)
+        enabled = key in choices
+        buttons.append([{"text": ("☑ " if enabled else "☐ ") + label,
+                         "callback_data": ("/unsub_" if enabled else "/sub_") + key}])
     if choices:
         records[user] = choices
     else:
         records.pop(user, None)
     persist()
-    send(dest["id"], "\n".join(lines) if len(lines) > 1 else "Доступних будинків немає.")
+    from schedule_board import APIError, quiet
+    text = "Особисті підписки. Натисніть на будинок." if buttons else "Доступних будинків немає."
+    params = dict(chat_id=dest["id"], text=text, reply_markup={"inline_keyboard": buttons})
+    try:
+        if callback:
+            call("editMessageText", **params, message_id=msg["message_id"])
+        else:
+            call("sendMessage", **params, disable_notification=quiet(datetime.now(KYIV)))
+    except APIError as exc:
+        if exc.code != 403 and not (callback and exc.code == 400 and
+                any(reason in exc.description for reason in ("not modified", "not found", "can't be edited"))):
+            raise
+    if callback:
+        try:
+            call("answerCallbackQuery", callback_query_id=callback["id"])
+        except APIError as exc:
+            if exc.code != 400:
+                raise
 
 
 async def notify_subscriptions(homes, state, call, send, persist, primary, primary_groups,
-                               source, now, conditional, week=False):
+                               source, now, conditional, week="off"):
     from alerts import fetch_address_status
     from schedule_board import APIError, build_board
     records = state.get("subscriptions", {})
@@ -139,23 +159,36 @@ async def notify_subscriptions(homes, state, call, send, persist, primary, prima
                 # A house-specific emergency at the primary address cannot establish
                 # conditions at another address. Mark those hours as conditional.
                 tentative = conditional or home[2] != primary
-                views[key] = build_board({}, source, groups, now, tentative, None, True,
-                                         parse_verified, compact_daily_message, include_week=week)
+                views[key] = {"daily": build_board({}, source, groups, now, tentative, None, True,
+                              parse_verified, compact_daily_message, include_week=week == "combined")}
+                if week == "separate":
+                    from bot import verified_week, compact_forecast_day
+                    monday = now.date() - timedelta(days=now.weekday())
+                    for group in groups:
+                        forecast = verified_week(source, group)
+                        if forecast is not None:
+                            label = group if len(groups) > 1 else None
+                            views[key]["week:" + group] = "\n\n".join(
+                                compact_forecast_day(monday + timedelta(days=n), forecast[n], label, now)
+                                for n in range(now.weekday(), 7))
             if views[key] is None:
                 continue
-            digest = hashlib.sha256(views[key].encode()).hexdigest()
-            if choices[key] == digest:
-                continue
+            history = choices[key]
+            if not isinstance(history, dict):
+                history = choices[key] = {"daily": history}
             try:
-                send(int(user), html.escape(home[0]) + "\n" + views[key])
+                for kind, view in views[key].items():
+                    digest = hashlib.sha256(view.encode()).hexdigest()
+                    if history.get(kind) != digest:
+                        send(int(user), html.escape(home[0]) + "\n" + view)
+                        history[kind] = digest
+                        persist()
             except APIError as exc:
                 if exc.code != 403:
                     raise
                 records.pop(user, None)
                 persist()
                 break
-            choices[key] = digest
-            persist()
         if not choices:
             records.pop(user, None)
             persist()

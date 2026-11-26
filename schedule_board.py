@@ -176,11 +176,12 @@ def update_pin(state, text, chat, call, send, persist):
 
 def answer_commands(state, text, chat, call, send, persist, menu=None, now_enabled=True):
     updates = call("getUpdates", offset=state.get("board:offset", 0), timeout=0,
-                   limit=100, allowed_updates=["message", "channel_post"])
+                   limit=100, allowed_updates=["message", "channel_post"] + (["callback_query"] if menu else []))
     for item in updates:
         msg = item.get("message") or item.get("channel_post") or {}
         if menu is not None:
-            menu(msg)
+            callback = item.get("callback_query")
+            menu(callback.get("message", {}) if callback else msg, callback)
         dest = msg.get("chat", {})
         command = re.fullmatch(r"/now(?:@(\w+))?", (msg.get("text") or "").strip(), re.I)
         if not now_enabled:

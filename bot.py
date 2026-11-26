@@ -1208,12 +1208,12 @@ async def once():
                 if action is answer_commands and menus_enabled:
                     from optional_schedules import notify_subscriptions, subscription_command, subscription_homes
                     homes = subscription_homes(config, chat)
-                    def menu(msg):
-                        subscription_command(msg, homes, state, call, send_board, persist)
+                    def menu(msg, callback):
+                        subscription_command(msg, homes, state, call, send_board, persist, callback)
                     answer_commands(state, board, chat, call, send_board, persist, menu=menu, now_enabled=now_enabled)
                     await notify_subscriptions(homes, state, call, send_board, persist,
                                                config["address"], house_groups if house is not None else None,
-                                               source, now, uncertain_gpv, week=weekly_mode == "combined")
+                                               source, now, uncertain_gpv, week=weekly_mode)
                 else:
                     action(state, board, chat, call, send_board, persist)
                 if action is update_pin:

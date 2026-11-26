@@ -26,13 +26,16 @@ def test_subscriptions_check_membership_and_revocation():
     homes = {"one": ("Перший", "-1", {}), "two": ("Другий", "-2", {})}
     state, messages = {}, []
     def call(method, **kw):
+        if method == "sendMessage":
+            messages.append(kw["reply_markup"]["inline_keyboard"])
+            return {}
         return {"status": "member" if kw["chat_id"] == "-1" else "left"}
     def speak(user, text):
         messages.append(text)
     msg = {"chat": {"type":"private","id":1}, "text":"/sub_one"}
     subscription_command(msg, homes, state, call, speak, lambda:None)
     assert state["subscriptions"]["1"] == {"one":""}
-    assert "Другий" not in messages[-1]
+    assert messages[-1] == [[{"text":"☑ Перший","callback_data":"/unsub_one"}]]
     asyncio.run(notify_subscriptions(homes, state, lambda *a, **k: {"status":"left"},
                                      speak, lambda:None, {}, [], None, datetime.now(KYIV), False))
     assert state["subscriptions"] == {}
@@ -78,3 +81,21 @@ def test_official_waiting_status_never_falls_through_to_mirror(monkeypatch):
               "mirror_region":"example"}
     assert not asyncio.run(reserve_view(config, ["GPV1.1"], now, True))
     assert len(calls) == 1
+
+
+def test_private_button_retry_and_wrong_sender():
+    homes = {"one": ("Дім", "-1", {})}
+    state, edits = {}, []
+    def call(method, **kwargs):
+        if method == "getChatMember":
+            return {"status":"member"}
+        edits.append(method)
+    msg = {"message_id":10, "chat":{"id":21, "type":"private"}}
+    callback = {"from":{"id":72}, "data":"/sub_one", "id":"example"}
+    subscription_command(msg, homes, state, call, None, lambda:None, callback)
+    assert state == {}
+    callback["from"]["id"] = 21
+    for _ in range(2):
+        subscription_command(msg, homes, state, call, None, lambda:None, callback)
+    assert state["subscriptions"] == {"21":{"one":""}}
+    assert edits == ["editMessageText","answerCallbackQuery"] * 2
