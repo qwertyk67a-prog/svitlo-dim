@@ -843,6 +843,18 @@ async def once():
             try:
                 house_groups = verified_house_queues(identifiers)
             except ValueError:
+                # Compare the two official responses without publishing identifiers.
+                if identifiers:
+                    from provider_transport import get_schedule as read_tables
+                    try:
+                        tables = await read_tables(config)
+                        today_rows = [rows for stamp, rows in tables.fact.days.items()
+                                      if datetime.fromtimestamp(int(stamp), KYIV).date() == today]
+                        listed = bool(today_rows) and all(
+                            any(group in rows for rows in today_rows) for group in identifiers)
+                        LOG.warning("Rejected address queues all in official daily table: %s", listed)
+                    except Exception as exc:
+                        LOG.warning("Daily queue comparison unavailable: %s", type(exc).__name__)
                 shapes = []
                 for item in (identifiers or ()):
                     # No private IDs or free-form directory text in public logs.
