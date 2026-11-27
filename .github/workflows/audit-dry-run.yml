@@ -42,7 +42,7 @@ jobs:
         env:
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           ANNOUNCEMENTS_ENABLED: ${{ secrets.ANNOUNCEMENTS_ENABLED || vars.ANNOUNCEMENTS_ENABLED || 'true' }}
-          REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '15' }}
+          REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '17' }}
           DRY_RUN: "true"
           STATE_PATH: bot_state.json
         run: python bot.py --once
