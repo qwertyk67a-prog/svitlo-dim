@@ -165,7 +165,7 @@ The private watchdog reports two consecutive failed schedule-pin checks separate
 
 ### House delivery settings
 
-The scheduled installation uses the Actions variable `REMINDER_MINUTES` (15 when unset).
+The scheduled installation uses the Actions variable `REMINDER_MINUTES` (17 when unset).
 Set it to 0 to disable. The former Actions secret of the same name no longer controls this workflow.
 The pin and /now can be switched independently through TELEGRAM_SCHEDULE_BOARD and NOW_COMMAND_ENABLED (both default on in Actions).
 Local executions still use the environment setting and default to 0.

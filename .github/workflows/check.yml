@@ -79,7 +79,7 @@ jobs:
           NOW_COMMAND_ENABLED: ${{ vars.NOW_COMMAND_ENABLED || 'true' }}
           PERSONAL_SUBSCRIPTIONS_ENABLED: ${{ vars.PERSONAL_SUBSCRIPTIONS_ENABLED || 'false' }}
           UNOFFICIAL_FALLBACK_ENABLED: ${{ vars.UNOFFICIAL_FALLBACK_ENABLED || 'true' }}
-          REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '15' }}
+          REMINDER_MINUTES: ${{ vars.REMINDER_MINUTES || '17' }}
           ANNOUNCEMENTS_ENABLED: ${{ secrets.ANNOUNCEMENTS_ENABLED || vars.ANNOUNCEMENTS_ENABLED || 'true' }}
           POWER_CONFIG_JSON: ${{ secrets.POWER_CONFIG_JSON }}
           STATE_PATH: bot_state.json
