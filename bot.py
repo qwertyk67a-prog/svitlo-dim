@@ -745,7 +745,7 @@ def telegram_send(token, chat, text, deadline=None):
     raise RuntimeError("Telegram: кількість повторів вичерпано")
 
 
-async def get_schedule(group_ids=None):
+async def get_schedule(group_ids=None, *, source=None):
     """Read official schedule using the private provider configuration."""
     from house_reliability import verified_house_queues
     from provider_transport import get_schedule as fetch_schedule
@@ -753,7 +753,8 @@ async def get_schedule(group_ids=None):
     if group_ids is None:
         raise RuntimeError("Потрібно підтвердити черги за адресою")
     group_ids = verified_house_queues(group_ids)
-    source = await fetch_schedule(config)
+    if source is None:
+        source = await fetch_schedule(config)
     if not source.preset.time_zone:
         raise RuntimeError("Джерело не повернуло часові інтервали")
     # A partial all-white table cannot establish a cancellation.
@@ -779,7 +780,49 @@ async def get_schedule(group_ids=None):
     return source, list(group_ids)
 
 
+async def confirm_address_groups(identifiers, now):
+    from house_reliability import verified_house_queues
+    from power_config import confirmed_catalog
+    from provider_transport import get_schedule as fetch_official
+
+    try:
+        return verified_house_queues(identifiers), None
+    except ValueError:
+        config = provider_config()
+        prefix = config["queue_display_prefix"]
+        if (config["adapter"] != "ajax_v1" or not prefix or not identifiers
+                or len(identifiers) > 16 or any(
+                    not isinstance(q, str) or not re.fullmatch(
+                        re.escape(prefix) + r"[0-9]{1,3}\.[0-9]{1,2}", q)
+                    for q in identifiers)):
+            raise
+
+    source = await fetch_official(config)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = source.fact.days.get(str(int(midnight.timestamp())), {}) if source.fact else {}
+    if any(parse_verified(rows.get(q), source.preset.time_zone) is None for q in identifiers):
+        raise ValueError("Official daily rows do not confirm address queues")
+    token = confirmed_catalog.set(tuple(sorted(set(identifiers))))
+    try:
+        # Also validate the full 24-hour label axis before granting trust.
+        await get_schedule(identifiers, source=source)
+    except Exception:
+        confirmed_catalog.reset(token)
+        raise
+    LOG.info("Address queues confirmed by current official daily rows")
+    return verified_house_queues(identifiers), source
+
+
 async def once():
+    from power_config import confirmed_catalog
+    token = confirmed_catalog.set(())
+    try:
+        return await _once()
+    finally:
+        confirmed_catalog.reset(token)
+
+
+async def _once():
     """One-house notification run: urgent changes first, reminders only while timely."""
     from house_reliability import (
         due_reminders, house_queue_transition, parse_reminder_minutes,
@@ -828,6 +871,7 @@ async def once():
 
     # Queue assignments come only from the official address response.
     house = None
+    address_source = None
     rejected_groups = ()
     house_groups = None
     queue_change = None
@@ -842,7 +886,11 @@ async def once():
             house = await fetch_address_status(private_address)
             identifiers = house.group_ids if house is not None else None
             try:
-                house_groups = verified_house_queues(identifiers)
+                house_groups, address_source = await confirm_address_groups(identifiers, now)
+                if address_source is not None:
+                    # Restore tokens which the installation's older catalog could not decode.
+                    reverse = {token: group for group, token in _queue_tokens().items()}
+                    state = _map_state_values(state, reverse)
             except ValueError:
                 rejected_groups = identifiers or ()
                 shapes = []
@@ -948,7 +996,10 @@ async def once():
 
     try:
         if house_groups is not None:
-            source, groups = await get_schedule(house_groups)
+            if address_source is None:
+                source, groups = await get_schedule(house_groups)
+            else:
+                source, groups = address_source, list(house_groups)
         else:
             source, groups = None, []
     except Exception as exc:

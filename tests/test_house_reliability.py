@@ -929,3 +929,37 @@ def test_later_address_correction_preserves_evening_outage(tmp_path, monkeypatch
     asyncio.run(bot.once())
     assert len(sent) == count + 2
     assert "12:05–19:00" in sent[-1] and "22:00–24:00" in sent[-1]
+
+
+def test_official_confirmation_for_new_address_queue(monkeypatch):
+    import asyncio
+    from datetime import datetime
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    import bot
+    import provider_transport
+    from power_config import confirmed_catalog
+
+    now = datetime(2030, 1, 2, tzinfo=bot.KYIV)
+    stamp = str(int(now.timestamp()))
+    queue = "GPV8.2"
+    labels = {"a": "00-12", "b": "12-24"}
+    source = SimpleNamespace(preset=SimpleNamespace(time_zone=labels, groups={}),
+                             fact=SimpleNamespace(days={stamp: {queue: {"a": "yes", "b": "no"}}}))
+    monkeypatch.setattr(provider_transport, "get_schedule", AsyncMock(return_value=source))
+
+    async def check():
+        groups, used = await bot.confirm_address_groups([queue], now)
+        assert groups == (queue,) and used is source
+        assert queue in bot._queue_tokens()
+
+    asyncio.run(check())
+    assert confirmed_catalog.get() == ()
+    for rows in ({}, {queue: {"a": "yes"}}, {queue: {"a": "yes", "b": "unknown"}}):
+        source.fact.days = {stamp: rows}
+        with pytest.raises(ValueError):
+            asyncio.run(check())
+    source.fact.days = {stamp: {queue: {"a": "yes", "b": "no"}}}
+    labels["a"] = "01-12"
+    with pytest.raises(RuntimeError):
+        asyncio.run(check())
