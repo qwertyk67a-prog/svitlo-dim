@@ -33,6 +33,23 @@ def compact_forecast_day(day, spans, group=None, observed_at=None):
     return "\n".join([header, *(times or [empty])])
 
 
+def cached_board_spans(cache, group, day):
+    """Read the previous displayed day, including checkpoints predating start notices."""
+    if cache.get("groups") != [group]:
+        return []
+    block = cache.get("records", {}).get(day.isoformat(), {}).get(group)
+    if block is not None:
+        spans = []
+        mode = "off"
+        for line in block.splitlines():
+            if line == "Можливі відключення:":
+                mode = "maybe"
+            if re.fullmatch(r"\d{2}:\d{2}–\d{2}:\d{2}", line):
+                spans.append([*time_range(line), mode])
+        return spans
+    return []
+
+
 def compact_daily_message(day, spans, *, group=None, conditional=False):
     date_line = day.strftime("%d.%m.%Y")
     if group is not None:
@@ -861,6 +878,7 @@ async def _once():
     LOG.info("Нагадування, хв: %s", list(leads))
     trim_state(state, today)
     if weekly_mode != state.get("board:weekly_mode", "off"):
+        state.pop("board:start_baseline", None)
         state["board:weekly_mode"] = weekly_mode
         if weekly_mode == "separate":
             state["board:weekly_activation"] = now.isoformat()
@@ -992,7 +1010,13 @@ async def _once():
             source_problems.append("official_feed")
 
     shared_daily = COMPACT_DAILY_SCHEDULE and weekly_mode != "combined" and len(house_groups or ()) == 1
-    window = address_window(state.get("address:last_outage"))
+    combined_home = weekly_mode == "combined" and len(house_groups or ()) == 1
+    cache = state.get("board:cache", {})
+    minute = now.hour * 60 + now.minute
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    address_record = state.get("address:last_outage")
+    window = address_window(address_record)
+    address_start_changed = False
     if address_ok and house is not None:
         try:
             from alerts import address_decision
@@ -1001,6 +1025,20 @@ async def _once():
                 if key == "address:groups":
                     # Only house_queue_transition owns this state key.
                     continue
+                if combined_home and key == "address:last_outage":
+                    start, end = address_window(value)
+                    old_start, old_end = window
+                    if not old_start and not queue_change and start and end:
+                        for a, b, mode in cached_board_spans(cache, house_groups[0], today):
+                            if mode == "off" and a <= minute < b and midnight + timedelta(minutes=b) == end:
+                                old_start, old_end = midnight + timedelta(minutes=a), end
+                                break
+                    address_start_changed = bool(start and old_start and end and old_end and not queue_change
+                                                 and start != old_start and max(start, old_start) <= now < min(end, old_end))
+                    if address_start_changed or (address_record and address_record.get("corrected_start")
+                                                 and start and start == old_start and end and start <= now < end):
+                        value["corrected_start"] = True
+                    address_record = value
                 if shared_daily and key == "address:last_outage":
                     window = address_window(value)
                     if all(window) or value.get("status") == "expired":
@@ -1227,6 +1265,33 @@ async def _once():
                         continue
                 enqueue(5, key, {"sent": True}, message, "reminder", deadline)
 
+    if combined_home and address_ok and source and source.preset:
+        group = house_groups[0]
+        stamp = str(int(midnight.timestamp()))
+        rows = source.fact.days.get(stamp, {}).get(group) if source.fact else None
+        spans = parse_verified(rows, source.preset.time_zone)
+        if spans is not None:
+            baseline_key = "board:start_baseline"
+            baseline = state.get(baseline_key)
+            if baseline is None:
+                baseline = {"date": today.isoformat(), "group": group,
+                            "spans": cached_board_spans(cache, group, today)}
+            record = {"date": today.isoformat(), "group": group, "spans": [list(slot) for slot in spans]}
+            message = None
+            if baseline.get("date") == record["date"] and baseline.get("group") == group:
+                old = next((s for s in baseline["spans"] if s[0] <= minute < s[1]), None)
+                active = next((s for s in record["spans"] if s[0] <= minute < s[1]), None)
+                if old and active and old[0] != active[0] and old[2] == active[2] == "off" and not uncertain_gpv:
+                    addr_start, addr_end = address_window(address_record)
+                    covered = (address_record and address_record.get("corrected_start") and addr_start
+                               and addr_start <= now < addr_end
+                               and addr_end == midnight + timedelta(minutes=active[1]))
+                    if not covered:
+                        message = "Уточнено час початку за графіком.\n" + compact_daily_message(
+                            today, [active], conditional=uncertain_gpv)
+            if state.get(baseline_key) != record:
+                enqueue(2, baseline_key, record, message, "start_correction")
+
     shared_text = ""
     if shared_daily and address_ok:
         record, shared_text, changed = resident_plan(
@@ -1256,7 +1321,7 @@ async def _once():
             newer_schedule = bool(house_groups) and all(
                 f"{date_key}:{group}" in covered for group in house_groups)
             old = None if same_run or newer_schedule else state.get(key)
-            if address_already_announced(value, old, state, house_groups, now, uncertain_gpv):
+            if not address_start_changed and address_already_announced(value, old, state, house_groups, now, uncertain_gpv):
                 message = None
             else:
                 message = address_notice_with_schedule(value, now, source, house_groups, uncertain_gpv)
@@ -1346,7 +1411,8 @@ async def _once():
             _, shared_text, _ = resident_plan(state, None, old_group, (None, None), now, False)
         board = shared_text if shared_daily or shared_text else build_board(cache, source, house_groups, now, uncertain_gpv, house,
                             "address_lookup" not in source_problems, parse_verified, compact_daily_message,
-                            include_week=weekly_mode == "combined")
+                            include_week=weekly_mode == "combined",
+                            corrected_address=bool(combined_home and address_record and address_record.get("corrected_start")))
         mirror_enabled = os.getenv("UNOFFICIAL_FALLBACK_ENABLED") == "true"
         pin_text = board
         if ((config.get("official_reserve_url") or mirror_enabled)

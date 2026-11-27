@@ -42,7 +42,7 @@ def api(token, method, **params):
 
 
 def build_board(cache, source, groups, now, conditional, address, reliable, parse, format_day,
-                include_week=False):
+                include_week=False, corrected_address=False):
     groups = sorted(groups or [])
     if groups and groups != cache.get("groups"):
         cache.clear()
@@ -56,6 +56,12 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
     if source and source.fact:
         for stamp, rows in source.fact.days.items():
             daily[datetime.fromtimestamp(int(stamp), KYIV).date()] = rows
+    corrected_window = None
+    if corrected_address and address:
+        from alerts import exact_provider_time
+        start, end = exact_provider_time(address.start_date), exact_provider_time(address.end_date)
+        if start and end and start <= now < end:
+            corrected_window = start, end
     sections = []
     for day in dates:
         date_key = day.isoformat()
@@ -65,6 +71,14 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
             spans = parse(slots, source.preset.time_zone) if source and slots is not None else None
             label = group if len(cache["groups"]) > 1 else None
             if spans is not None and reliable:
+                if corrected_window and day == now.date() and not conditional:
+                    start, end = corrected_window
+                    midnight = datetime.combine(day, datetime.min.time(), KYIV)
+                    if start.date() == day:
+                        spans = [(start.hour * 60 + start.minute, b, mode)
+                                 if mode == "off" and midnight + timedelta(minutes=a) <= now
+                                 and midnight + timedelta(minutes=b) == end else (a, b, mode)
+                                 for a, b, mode in spans]
                 if spans:
                     saved[group] = format_day(day, spans, group=label, conditional=conditional)
                 else:
@@ -115,7 +129,10 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                 equivalent &= any(midnight + timedelta(minutes=a) <= now
                                   and midnight + timedelta(minutes=b) == end and kind == "off"
                                   for a, b, kind in spans or [])
-            if not equivalent:
+            if corrected_window and (not equivalent or start.date() != now.date()):
+                sections.append("За адресою вказано відключення: " + start.strftime("%d.%m.%Y %H:%M")
+                                + "–" + end.strftime("%d.%m.%Y %H:%M"))
+            elif not equivalent:
                 sections.append("За адресою вказано відключення до " + end.strftime("%d.%m.%Y %H:%M"))
     return "\n\n".join(sections)
 

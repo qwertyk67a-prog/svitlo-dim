@@ -998,3 +998,56 @@ def test_dynamic_queue_backup_after_restart(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="address_lookup"):
         asyncio.run(bot.once())
     assert read_table.await_count == 2 and not sent
+
+
+@pytest.mark.parametrize("address_revision", [False, True])
+def test_combined_active_start_revisions_update_pin_and_notify_once(tmp_path, monkeypatch, address_revision):
+    import alerts
+    import schedule_board
+    path, current, sent = _late_test_setup(tmp_path, monkeypatch, {"1":"yes", "2":"yes", "3":"no"})
+    monkeypatch.setattr(bot, "COMPACT_DAILY_SCHEDULE", True)
+    monkeypatch.setenv("WEEKLY_SCHEDULE_MODE", "combined")
+    monkeypatch.setenv("TELEGRAM_SCHEDULE_BOARD", "true")
+    monkeypatch.setenv("NOW_COMMAND_ENABLED", "false")
+    entry = address_entry(["GPV3.1"])
+    async def home(_):
+        return entry
+    monkeypatch.setattr(alerts, "fetch_address_status", home)
+    pins = []
+    monkeypatch.setattr(schedule_board, "update_pin", lambda state, text, *args: pins.append(text))
+
+    def run():
+        asyncio.run(bot.once())
+
+    run()
+    assert not sent
+    assert "20:00–24:00" in pins[-1]
+    # Simulate an installed checkpoint that only has the rendered board.
+    state = bot.state_read(path)
+    state.pop("board:start_baseline")
+    bot.state_write(path, state)
+    if address_revision:
+        entry.start_date = "19.11.2026 20:15"
+        entry.end_date = "20.11.2026 00:00"
+        expected = "20:15"
+    else:
+        current["source"]["2"] = "no"
+        expected = "12:00"
+    run()
+    assert len(sent) == 1
+    assert expected in pins[-1] and expected in sent[-1]
+    assert "20:00–24:00" not in pins[-1]
+    if address_revision:
+        entry.start_date = "19.11.2026 20:22"
+        current["source"]["2"] = "no"
+        expected = "20:22"
+    else:
+        current["source"]["2"] = "yes"
+        expected = "20:00"
+    run()
+    run()
+    assert len(sent) == 2
+    assert expected in pins[-1] and expected in sent[-1]
+    current["source"]["1"] = "no"
+    run()
+    assert len(sent) == 2
