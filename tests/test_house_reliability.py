@@ -985,7 +985,8 @@ def test_dynamic_queue_backup_after_restart(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "telegram_send", lambda *args, **kwargs: sent.append(args[2]))
     asyncio.run(bot.once())
     assert queue not in path.read_text()
-    assert sent
+    assert bot.state_read(path)["house:queue_backup"]
+    assert read_table.await_count == 1
     sent.clear()
     address["queues"] = []
     with pytest.raises(RuntimeError, match="address_lookup"):
