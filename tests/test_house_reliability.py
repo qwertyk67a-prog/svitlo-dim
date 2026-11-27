@@ -141,7 +141,7 @@ def test_added_queue_produces_notice_and_both_schedules(tmp_path, monkeypatch):
     asyncio.run(bot.once())
     assert requested == [("GPV3.1", "GPV5.1")]
     assert len(calls) == 2
-    assert sum("ПрикладЕнерго оновив черги" in m or "Уточнено черги" in m for m in calls) == 0
+    assert sum("Змінилися коди графіка" in m or "Уточнено черги" in m for m in calls) == 0
     assert any("Черга 5.1" in m and "Графік відключень" in m for m in calls)
     assert any("Черга 3.1" in m and "Графік відключень" in m for m in calls)
     stored = bot.state_read(state_file)
@@ -172,7 +172,7 @@ def test_removed_queue_keeps_remaining_schedule_and_one_notice(tmp_path, monkeyp
     )
     asyncio.run(bot.once())
     assert len(calls) == 2
-    assert "Вилучено: 3.1" in calls[0]
+    assert "Вилучено: GPV3.1" in calls[0]
     assert any("Черга 5.1" in m for m in calls)
     asyncio.run(bot.once())
     assert len(calls) == 2
@@ -210,7 +210,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
 
     def send(_t,_c,text,deadline=None):
         calls.append(text)
-        if "ПрикладЕнерго оновив черги" in text:
+        if "Змінилися коди графіка" in text:
             raise RuntimeError("Telegram unavailable for queue-change notice")
     monkeypatch.setattr(bot,"telegram_send",send)
     with pytest.raises(RuntimeError,match="Помилки Telegram"):
@@ -221,7 +221,7 @@ def test_failed_queue_notice_retries_but_schedules_continue(tmp_path,monkeypatch
     monkeypatch.setattr(bot,"telegram_send",
                         lambda _t,_c,text,deadline=None: calls.append(text))
     asyncio.run(bot.once())
-    assert sum("ПрикладЕнерго оновив черги" in x for x in calls) == 2
+    assert sum("Змінилися коди графіка" in x for x in calls) == 2
     assert sum("Графік відключень" in x for x in calls) == 1
 
 
@@ -483,7 +483,7 @@ def test_official_feed_error_marks_action_failed_after_schedule_delivery(
     assert messages  # Valid daily GPV was not blocked by official feed outage.
 
 
-def test_group_stays_silent_while_address_api_unavailable(tmp_path, monkeypatch):
+def test_regional_warning_survives_address_failure_without_repeating(tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     setup(monkeypatch,state_file)
     monkeypatch.setenv("ANNOUNCEMENTS_ENABLED","true")
@@ -506,7 +506,10 @@ def test_group_stays_silent_while_address_api_unavailable(tmp_path, monkeypatch)
                         lambda _t,_c,txt,deadline=None: messages.append(txt))
     with pytest.raises(RuntimeError, match="address_lookup"):
         asyncio.run(bot.once())
-    assert messages == []
+    assert len(messages) == 1 and "екстрені відключення" in messages[0]
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
+    assert len(messages) == 1
 
 
 def test_multi_queue_schedule_disclaims_apartment_uncertainty(tmp_path,monkeypatch):
@@ -850,7 +853,7 @@ def test_retired_queue_in_checkpoint_cannot_block_new_assignment():
     old = "Q" + "a" * 24
     queues, message = house_queue_transition({"house:groups": [old]}, ("GPV3.1",))
     assert queues == ["GPV3.1"]
-    assert "вилучив" in message and old not in message
+    assert "Попередній код не розпізнано" in message and old not in message
     assert house_queue_transition({"house:groups": queues}, tuple(queues))[1] is None
 
 
@@ -952,6 +955,7 @@ def test_official_confirmation_for_new_address_queue(monkeypatch):
         groups, used = await bot.confirm_address_groups([queue], now)
         assert groups == (queue,) and used is source
         assert queue in bot._queue_tokens()
+        assert bot.queue_label(queue) == queue
 
     asyncio.run(check())
     assert confirmed_catalog.get() == ()
@@ -963,3 +967,34 @@ def test_official_confirmation_for_new_address_queue(monkeypatch):
     labels["a"] = "01-12"
     with pytest.raises(RuntimeError):
         asyncio.run(check())
+
+def test_dynamic_queue_backup_after_restart(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+    import provider_transport
+
+    path = tmp_path / "state.json"
+    setup(monkeypatch, path)
+    address = setup_address(monkeypatch)
+    queue = "GPV8.2"
+    address["queues"] = [queue]
+    source, _ = fake_schedule(queue, days=1)
+    source.preset.time_zone["1"] = "00-12"
+    read_table = AsyncMock(return_value=source)
+    monkeypatch.setattr(provider_transport, "get_schedule", read_table)
+    sent = []
+    monkeypatch.setattr(bot, "telegram_send", lambda *args, **kwargs: sent.append(args[2]))
+    asyncio.run(bot.once())
+    assert queue not in path.read_text()
+    assert bot.state_read(path)["house:queue_backup"]
+    assert read_table.await_count == 1
+    sent.clear()
+    address["queues"] = []
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
+    assert read_table.await_count == 2 and not sent
+    state = bot.state_read(path)
+    state["house:last_verified_at"] = (datetime.now(KYIV) - timedelta(days=2)).isoformat()
+    bot.state_write(path, state)
+    with pytest.raises(RuntimeError, match="address_lookup"):
+        asyncio.run(bot.once())
+    assert read_table.await_count == 2 and not sent

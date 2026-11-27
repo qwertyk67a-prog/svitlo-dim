@@ -59,7 +59,8 @@ def test_checkpoint_read_save_uses_state_branch_only(monkeypatch, tmp_path):
     assert all("bot_state.json" in v[1] for v in visited)
 
 
-def test_identical_checkpoint_is_not_written(monkeypatch, tmp_path):
+@pytest.mark.parametrize("lost_reply", [False, True])
+def test_identical_checkpoint_is_not_written(monkeypatch, tmp_path, lost_reply):
     monkeypatch.setenv("GITHUB_REPOSITORY", "test-user/svitlo-example")
     monkeypatch.setenv("REPOSITORY_STATE_TOKEN", "fake-token-for-test")
     monkeypatch.setenv("STATE_PATH", "state.json")
@@ -68,10 +69,16 @@ def test_identical_checkpoint_is_not_written(monkeypatch, tmp_path):
     calls = []
     def fake_call(repository, branch, token, payload=None):
         calls.append(payload)
+        if lost_reply and len(calls) == 1:
+            return {"sha":"old", "content":base64.b64encode(b"{}").decode()}
+        if payload is not None:
+            raise TimeoutError("lost PUT reply")
         return {"sha":"blob", "content":base64.b64encode(seal_checkpoint(b'{"v":2}')).decode()}
     monkeypatch.setattr(repo_state, "call_api", fake_call)
+    (tmp_path / "state.json.revision").write_text("old")
+    monkeypatch.setattr(repo_state.time, "sleep", lambda _: None)
     repo_state.save()
-    assert calls == [None]
+    assert [item is None for item in calls] == ([True, False, True] if lost_reply else [True])
 
 
 def test_conflicting_checkpoint_refuses_to_overwrite(monkeypatch,tmp_path):

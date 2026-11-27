@@ -16,7 +16,7 @@ from power_config import official_site, operator_label
 
 KYIV = ZoneInfo("Europe/Kyiv")
 ALLOWED = (5, 15, 30, 60)
-GRACE_SECONDS = 240
+GRACE_SECONDS = 360
 
 
 def parse_reminder_minutes(raw: str | None) -> tuple[int, ...]:
@@ -34,7 +34,7 @@ def parse_reminder_minutes(raw: str | None) -> tuple[int, ...]:
 
 def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
                   state: dict, parse_verified) -> list[tuple[str, str, datetime]]:
-    """Best-effort notices up to four minutes after their nominal due time.
+    """Best-effort notices up to six minutes after their nominal due time.
 
     No weekly forecasts, unknown slots or possible ('maybe') outages.
     The source must contain complete current daily GPV facts.
@@ -80,7 +80,9 @@ def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
 
 def queue_label(group: str) -> str:
     """Use the private display prefix; never guess a company's group format."""
-    from power_config import provider_config
+    from power_config import confirmed_catalog, provider_config
+    if group in confirmed_catalog.get():
+        return group
     prefix = provider_config()["queue_display_prefix"]
     return group.removeprefix(prefix) if prefix else group
 
@@ -131,23 +133,16 @@ def house_queue_transition(state: dict, groups: tuple[str, ...],
     if not added and not removed and not retired:
         return list(current), None
 
-    title = (f"🔄 <b>{html.escape(operator_label())} оновив черги будинку</b>"
-             if has_previous else "⚡️ <b>Уточнено черги будинку</b>")
-    lines = [title]
+    lines = ["🔄 <b>Змінилися коди графіка за адресою</b>"]
     if added:
-        lines.append("➕ Додано: " + ", ".join(
-            html.escape(queue_label(x)) for x in added))
-    if retired:
-        lines.append("Оператор вилучив попередню чергу з довідника.")
+        lines.append("Додано: " + ", ".join(html.escape(x) for x in added))
     if removed:
-        label = "Вилучено" if has_previous else "Раніше відстежували"
-        lines.append("➖ " + label + ": " + ", ".join(
-            html.escape(queue_label(x)) for x in removed))
+        lines.append("Вилучено: " + ", ".join(html.escape(x) for x in removed))
+    if retired:
+        lines.append("Попередній код не розпізнано.")
     lines.extend((
-        "Актуальні черги: " + ", ".join(
-            html.escape(queue_label(x)) for x in current),
-        "✅ Бот продовжує надсилати графіки всіх черг за цією адресою.",
-        "Відключення можуть відрізнятися для частин будинку.",
+        "Коди в адресному записі: " + ", ".join(html.escape(x) for x in current),
+        "Бот продовжує перевіряти графік за цими кодами.",
         f'<a href="{html.escape(official_site(), quote=True)}">Джерело: {html.escape(operator_label())}</a>',
     ))
     return list(current), "\n".join(lines)
