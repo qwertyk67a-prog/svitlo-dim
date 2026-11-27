@@ -156,7 +156,8 @@ chat ID in the Worker runtime Secrets.
 
 The production check maintains one separate pinned schedule. Ordinary alerts
 remain in the chat history. Allow the bot to pin messages in the group.
-Resident messages are silent from 21:00 through 08:59 in Europe/Kyiv.
+Resident messages and pins allow sound from 10:00 until local sunset or 20:00, whichever comes first (Europe/Kyiv).
+The bot calculates sunset offline for the configured Ukrainian city. An unresolved city keeps notifications silent.
 Send /now in the configured chat, or privately as a verified group member.
 The regular monitoring job reads commands, so replies may take one polling
 cycle. Missing or incomplete source data are labelled on the saved schedule.

@@ -3,16 +3,45 @@ import hashlib
 import logging
 import re
 from datetime import datetime, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import requests
+from astral import Observer
+from astral.sun import sunset
+from geonamescache import GeonamesCache
+
+from power_config import provider_config
 
 KYIV = ZoneInfo("Europe/Kyiv")
 LOG = logging.getLogger("schedule-board")
 
 
+@lru_cache(maxsize=1)
+def city_observer():
+    config = provider_config(required=False)
+    names = (config.get("address", {}).get("city", ""), config.get("city_label", ""))
+    names = {re.sub(r"^(?:м\.\s*|місто\s+)", "", name.casefold()).strip() for name in names} - {""}
+    matches = [city for city in GeonamesCache().get_cities().values()
+               if city["countrycode"] == "UA" and any(alias.casefold() in names
+               for alias in (city["name"], *city["alternatenames"]))]
+    if len(matches) == 1:
+        return Observer(matches[0]["latitude"], matches[0]["longitude"])
+    LOG.warning("Sunset city unresolved; resident notifications will be silent")
+
+
+@lru_cache(maxsize=1)
+def city_sunset(day):
+    observer = city_observer()
+    return sunset(observer, day, KYIV) if observer else None
+
+
 def quiet(now):
-    return not 9 <= now.astimezone(KYIV).hour < 21
+    local = now.astimezone(KYIV)
+    if not 10 <= local.hour < 20:
+        return True
+    end = city_sunset(local.date())
+    return end is None or local >= end
 
 
 class APIError(RuntimeError):
@@ -168,7 +197,7 @@ def update_pin(state, text, chat, call, send, persist):
         persist()
     if not pin.get("pinned"):
         try:
-            call("pinChatMessage", chat_id=chat, message_id=pin["id"], disable_notification=True)
+            call("pinChatMessage", chat_id=chat, message_id=pin["id"], disable_notification=quiet(datetime.now(KYIV)))
         except APIError as exc:
             for detail in ("not enough rights", "chat_admin_required", "not an administrator", "upgraded to a supergroup", "message can't be pinned", "chat not found", "message to pin not found"):
                 if detail in exc.description:

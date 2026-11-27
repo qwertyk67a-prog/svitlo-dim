@@ -1,12 +1,37 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+import schedule_board
 from schedule_board import KYIV, answer_commands, quiet, update_pin, build_board
 from types import SimpleNamespace
 from bot import parse_verified, compact_daily_message
 
 
-def test_kyiv_silent_boundaries():
-    for hour, minute, expected in [(20,59,False),(21,0,True),(8,59,True),(9,0,False)]:
-        assert quiet(datetime(2026,11,23,hour,minute,tzinfo=KYIV)) == expected
+def test_kyiv_silent_boundaries(monkeypatch):
+    from astral import Observer
+
+    monkeypatch.setattr(schedule_board, "city_observer", lambda: Observer(48, 33))
+    schedule_board.city_sunset.cache_clear()
+    winter = datetime(2026, 11, 27, 10, tzinfo=KYIV)
+    summer = datetime(2026, 6, 21, 20, tzinfo=KYIV)
+    end = schedule_board.city_sunset(winter.date())
+    tick = timedelta(microseconds=1)
+    assert quiet(winter - tick) and not quiet(winter)
+    assert not quiet(end - tick) and quiet(end.astimezone(timezone.utc))
+    assert not quiet(summer - tick) and quiet(summer)
+    schedule_board.city_sunset.cache_clear()
+
+
+def test_pin_uses_quiet_flag():
+    for silent in (True, False):
+        with patch("schedule_board.quiet", return_value=silent):
+            calls = []
+            def call(method, **args):
+                calls.append((method, args))
+                return {}
+            update_pin({}, "text", "chat", call, lambda *_: 7, lambda: None)
+            assert calls[-1] == ("pinChatMessage", dict(chat_id="chat", message_id=7,
+                                                        disable_notification=silent))
 
 
 def test_board_only_edits_its_own_card_after_migration():
