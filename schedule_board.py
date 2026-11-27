@@ -120,7 +120,7 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                 header = format_day(day, [], group=label).splitlines()[0]
                 sections.append(header + "\nПідтверджений графік недоступний")
     if include_week:
-        from bot import compact_forecast_day, verified_week
+        from bot import compact_forecast_day, upcoming_spans, verified_week
 
         monday = dates[0] - timedelta(days=dates[0].weekday())
         forecast = cache.setdefault("forecast", {})
@@ -139,13 +139,16 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
                     continue
                 if not saved_week or day >= monday + timedelta(days=7):
                     continue
-                block = compact_forecast_day(day, saved_week[day.weekday()], label, now)
+                spans = upcoming_spans(day, saved_week[day.weekday()], now)
+                if not spans:
+                    continue
+                block = compact_forecast_day(day, spans, label)
                 if week is None:
                     block += "\n(останні збережені дані)"
                 sections.append(block)
     if not sections:
         sections.append(now.strftime("%d.%m.%Y") + "\nПідтверджений графік недоступний")
-    if address:
+    if address and not include_week:
         from alerts import exact_provider_time
         start = exact_provider_time(address.start_date)
         end = exact_provider_time(address.end_date)
