@@ -106,3 +106,24 @@ def test_combined_week_respects_facts_stale_forecast_and_sunday_boundary():
     assert "01.12.2026" not in text
     assert "останні збережені дані" in render(None)
     assert "Тижневий" not in render(source, False)
+
+
+def test_combined_board_omits_empty_weekend_and_address_footer():
+    now = datetime(2026, 11, 27, 20, tzinfo=KYIV)
+    labels = {"1": "00-10", "2": "10:00-16:30", "3": "16:30-19:00",
+              "4": "19:00-22:30", "5": "22:30-24:00"}
+    clear = dict.fromkeys(labels, "yes")
+    friday = dict(clear, **{"2": "no", "4": "no"})
+    forecast = SimpleNamespace(get_day=lambda weekday: SimpleNamespace(slots=clear))
+    preset = SimpleNamespace(is_active=True, time_zone=labels, groups={"q": forecast})
+    source = SimpleNamespace(preset=preset, fact=SimpleNamespace(days={
+        str(int(now.timestamp())): {"q": friday}}))
+    address = SimpleNamespace(start_date="27.11.2026 19:30", end_date="27.11.2026 23:27")
+    cache = {}
+    def render():
+        return build_board(cache, source, ["q"], now, False, address, True,
+                           parse_verified, compact_daily_message, include_week=True)
+    expected = "27.11.2026\nВідключення:\n10:00–16:30\n19:00–22:30"
+    assert render() == expected
+    address.end_date = "27.11.2026 23:45"
+    assert render() == expected
