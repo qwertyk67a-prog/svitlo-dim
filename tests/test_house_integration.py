@@ -49,8 +49,7 @@ def test_grace_covers_poll_interval_and_stops_at_outage():
     assert len(items) == 1
     key, message, deadline = items[0]
     assert key == "reminder:2026-11-12:GPV3.1:1080:5"
-    assert "Нагадування" in message
-    assert "17:55" not in message and "18:00" in message
+    assert message == "⏰ до відключення ≈ 4 хв."
     assert deadline == on(18,0)
     assert len(due_reminders(src, GROUP, on(17,58), (5,), {}, parse_verified)) == 1
     assert due_reminders(src, GROUP, on(17,59), (5,), {}, parse_verified)
@@ -90,7 +89,7 @@ def test_tomorrow_midnight_reminder_can_be_due_today():
     s.fact.days[stamp][GROUP] = {"1":"no","2":"yes","3":"yes"}
     items = due_reminders(s,GROUP,on(23,55,10),(5,),{},parse_verified)
     assert len(items) == 1
-    assert "00:00" in items[0][1]
+    assert items[0][1] == "⏰ до відключення ≈ 4 хв."
 
 
 def test_initial_single_verified_queue_is_silent():

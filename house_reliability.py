@@ -67,13 +67,7 @@ def due_reminders(source, group: str, now: datetime, choices: tuple[int, ...],
                 if key in state:
                     continue
                 remaining = max(1, int((outage_start - now).total_seconds() // 60))
-                text = "\n".join((
-                    "⏰ <b>Нагадування про планове відключення</b>",
-                    f"📅 {day:%d.%m.%Y} · Черга {html.escape(queue_label(group))}",
-                    f"Початок: <b>{start_minutes // 60:02d}:{start_minutes % 60:02d}</b>",
-                    f"До відключення — приблизно {remaining} хв.",
-                    "Час може змінитися. Актуальні зміни графіка публікуються окремо.",
-                ))
+                text = f"⏰ до відключення ≈ {remaining} хв."
                 emitted.append((key, text, deadline))
     return sorted(emitted, key=lambda x: x[2])
 
