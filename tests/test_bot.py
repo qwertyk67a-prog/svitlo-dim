@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bot import (
-    cancellation_message, collect_notifications, day_message, duration,
+    address_notice_with_schedule, cancellation_message, collect_notifications, day_message, duration,
     fingerprint, intervals, minutes_text, parse_verified, state_digest,
     newly_current_schedule_outage,
     state_status, time_range, weekly_cancellation_message, weekly_message,
@@ -18,6 +18,13 @@ TOMORROW = TODAY + timedelta(days=1)
 GROUP = "GPV3.1"
 LABELS = {"1": "00-01", "2": "01-02", "3": "02-03"}
 CLEAR = {"1": "yes", "2": "yes", "3": "yes"}
+
+
+def test_address_notice_shows_date_and_interval_only():
+    now = datetime(2026, 11, 27, 19, 51, tzinfo=KYIV)
+    record = {"status": "active", "start": "27.11.2026 19:30", "end": "27.11.2026 23:27"}
+    message = address_notice_with_schedule(record, now, None, [], False)
+    assert message == "27.11.2026\n19:30–23:27"
 
 
 def full(**updates):

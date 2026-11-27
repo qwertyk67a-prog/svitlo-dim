@@ -185,7 +185,7 @@ def compact_address_message(value, now):
         detail = "З " + beginning + ", час завершення невідомий"
     else:
         detail = "Час не вказано"
-    return day.strftime("%d.%m.%Y") + "\nЗа повідомленням оператора для будинку:\n" + detail
+    return day.strftime("%d.%m.%Y") + "\n" + detail
 
 
 def address_notice_with_schedule(value, now, source, groups, conditional):
