@@ -666,7 +666,7 @@ def _map_state_values(value, mapping):
     if isinstance(value, tuple):
         return [_map_state_values(item, mapping) for item in value]
     if isinstance(value, str):
-        return mapping.get(value, value)
+        return mapping.get(value) or _map_state_key(value, mapping)
     return value
 
 
@@ -876,7 +876,6 @@ async def _once():
     house_groups = None
     queue_change = None
     regional_scope = None
-    provider_config()
     private_address = address_json()
     if private_address:
         try:
@@ -901,6 +900,15 @@ async def _once():
                     shapes.append(" ".join("N" if w.isdecimal() else w if w in allowed else "?" for w in words)[:60])
                 LOG.warning("Address matched; queue validation: %s", shapes or "missing")
                 raise
+            # Keep newly learned IDs recoverable after restart without exposing them.
+            if address_source is None:
+                state.pop("house:queue_backup", None)
+            elif ("house:queue_backup" not in state
+                  or state.get("house:verified_groups") != list(house_groups)):
+                from scripts.state_crypto import seal_checkpoint
+                state["house:queue_backup"] = seal_checkpoint(
+                    json.dumps({"groups": house_groups}).encode()
+                ).decode("ascii")
             # One checkpoint per hour is sufficient to establish a bounded
             # fallback age without committing new state every five minutes.
             verified_hour = now.replace(minute=0, second=0, microsecond=0).isoformat()
@@ -928,10 +936,18 @@ async def _once():
             if cached and cached_queue_is_fresh(
                     state.get("house:last_verified_at"), now):
                 try:
+                    backup = state.get("house:queue_backup")
+                    if backup:
+                        from power_config import confirmed_catalog
+                        from scripts.state_crypto import open_checkpoint
+                        groups = json.loads(open_checkpoint(backup.encode("ascii")))["groups"]
+                        confirmed_catalog.set(tuple(groups))
+                        reverse = {token: group for group, token in _queue_tokens().items()}
+                        state = _map_state_values(state, reverse)
+                        cached = state["house:verified_groups"]
                     house_groups = verified_house_queues(cached)
-                    house_snapshot, queue_change = house_queue_transition(state, house_groups)
                     LOG.warning("Тимчасово використовую перевірені черги з кешу")
-                except ValueError:
+                except (ValueError, RuntimeError, KeyError, TypeError, AttributeError):
                     house_groups = None
             else:
                 LOG.warning("Підтвердження черги застаріле або відсутнє")
@@ -959,7 +975,7 @@ async def _once():
             persist()
 
     # Official emergency and GAV announcements are prioritized.
-    if address_ok and os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
+    if (address_ok or regional_scope is not None) and os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
         try:
             from alerts import fetch_official_page, region_candidates
             events = region_candidates(

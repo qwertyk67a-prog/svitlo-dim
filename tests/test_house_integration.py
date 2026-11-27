@@ -42,7 +42,7 @@ def test_opt_in_default_off_and_multiple_choices():
             parse_reminder_minutes(value)
 
 
-def test_four_minute_grace_and_skip_late_reminder():
+def test_grace_covers_poll_interval_and_stops_at_outage():
     src = provider()
     assert due_reminders(src, GROUP, on(17,54,59), (5,), {}, parse_verified) == []
     items = due_reminders(src, GROUP, on(17,55,30), (5,), {}, parse_verified)
@@ -51,9 +51,12 @@ def test_four_minute_grace_and_skip_late_reminder():
     assert key == "reminder:2026-11-12:GPV3.1:1080:5"
     assert "Нагадування" in message
     assert "17:55" not in message and "18:00" in message
-    assert deadline == on(17,59)
+    assert deadline == on(18,0)
     assert len(due_reminders(src, GROUP, on(17,58), (5,), {}, parse_verified)) == 1
-    assert due_reminders(src, GROUP, on(17,59), (5,), {}, parse_verified) == []
+    assert due_reminders(src, GROUP, on(17,59), (5,), {}, parse_verified)
+    assert due_reminders(src, GROUP, on(17,50,1), (15,), {}, parse_verified)
+    assert due_reminders(src, GROUP, on(17,51), (15,), {}, parse_verified) == []
+    assert due_reminders(src, GROUP, on(18,0), (5,), {}, parse_verified) == []
     assert due_reminders(src, GROUP, on(18,1), (5,), {}, parse_verified) == []
 
 
@@ -101,8 +104,8 @@ def test_one_verified_queue_is_replaced_automatically():
     state = {"house:groups": ["GPV3.1"]}
     queues, notice = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert queues == ["GPV5.1"]
-    assert "Додано: 5.1" in notice
-    assert "Вилучено: 3.1" in notice
+    assert "Додано: GPV5.1" in notice
+    assert "Вилучено: GPV3.1" in notice
     assert "продовжує" in notice
     assert "Вулиця_Приклад" not in notice
     # State must not advance before successful Telegram delivery.
@@ -116,16 +119,16 @@ def test_new_queue_added_to_house_without_disabling_old_queue():
     state = {"house:groups": ["GPV3.1"]}
     groups, msg = house_queue_transition(state, ("GPV3.1", "GPV5.1"), GROUP)
     assert groups == ["GPV3.1", "GPV5.1"]
-    assert "Додано: 5.1" in msg
+    assert "Додано: GPV5.1" in msg
     assert "Вилучено" not in msg
-    assert "Актуальні черги: 3.1, 5.1" in msg
+    assert "Коди в адресному записі: GPV3.1, GPV5.1" in msg
 
 
 def test_old_queue_removed_but_remaining_queue_stays_active():
     state = {"house:groups": ["GPV3.1", "GPV5.1"]}
     groups, msg = house_queue_transition(state, ("GPV5.1",), GROUP)
     assert groups == ["GPV5.1"]
-    assert "Вилучено: 3.1" in msg
+    assert "Вилучено: GPV3.1" in msg
     assert "Додано:" not in msg
 
 

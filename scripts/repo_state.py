@@ -9,7 +9,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
-from urllib.error import HTTPError
+import time
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -61,6 +62,8 @@ def call_api(repository, branch, token, payload=None):
                 raise RuntimeError("Checkpoint response too large")
             return json.loads(data)
     except HTTPError as exc:
+        if exc.code in (500, 502, 503, 504):
+            raise ConnectionError("Temporary checkpoint service failure") from None
         # Never echo API body. It may reflect unexpected data.
         raise RuntimeError("GitHub checkpoint API HTTP " + str(exc.code)) from None
 
@@ -108,6 +111,15 @@ def load():
 
 
 def save():
+    try:
+        _save()
+    except (URLError, TimeoutError, ConnectionError):
+        # Read back before retrying: a lost PUT response can hide a successful write.
+        time.sleep(2)
+        _save()
+
+
+def _save():
     repository, branch, token, path = settings()
     if not path.is_file():
         raise RuntimeError("Missing checkpoint: refusing to overwrite remote state")
