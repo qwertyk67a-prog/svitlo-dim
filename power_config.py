@@ -4,12 +4,17 @@ The public repository contains no actual operator endpoints or house address.
 Only the selected compatible adapter can be used; never execute arbitrary
 modules, URLs or Python code supplied in configuration.
 """
+from contextvars import ContextVar
 import hashlib
 import hmac
 import json
 import os
 import re
 from urllib.parse import urlparse
+
+
+# Only populated during one run after the official address and daily row agree.
+confirmed_catalog = ContextVar("confirmed_catalog", default=())
 
 
 class ConfigurationError(RuntimeError):
@@ -79,7 +84,7 @@ def provider_config(*, required=True):
         raise ConfigurationError("queue_catalog must contain 1-128 safe queue IDs")
     if len(catalog) != len(set(catalog)):
         raise ConfigurationError("queue_catalog contains duplicates")
-    config["queue_catalog"] = tuple(catalog)
+    config["queue_catalog"] = tuple(dict.fromkeys((*catalog, *confirmed_catalog.get())))
     prefix = config.get("queue_display_prefix", "")
     if not isinstance(prefix, str) or len(prefix) > 24:
         raise ConfigurationError("Invalid queue_display_prefix")

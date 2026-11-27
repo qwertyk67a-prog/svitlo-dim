@@ -7,8 +7,8 @@ import sys
 from power_config import provider_config, address_json
 from event_scope import house_scope_from_secret
 from alerts import fetch_address_status
-from bot import get_schedule
-from house_reliability import verified_house_queues
+from datetime import datetime
+from bot import KYIV, confirm_address_groups, get_schedule
 
 
 async def main():
@@ -18,9 +18,9 @@ async def main():
     print("District configured:", bool(scope.get("district")))
     print("Quarter configured:", bool(scope.get("quarter")))
     response = await fetch_address_status(address_json())
-    groups = verified_house_queues(response.group_ids)
+    groups, source = await confirm_address_groups(response.group_ids, datetime.now(KYIV))
     print("Verified queue count:", len(groups))
-    _, available = await get_schedule(groups)
+    _, available = await get_schedule(groups, source=source)
     print("Official schedule accessible for:", len(available), "queues")
     print("No Telegram messages were sent.")
 
