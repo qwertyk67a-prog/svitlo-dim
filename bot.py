@@ -896,13 +896,25 @@ async def _once():
     house_groups = None
     queue_change = None
     regional_scope = None
+    from alerts import fetch_official_page
+    announcements_enabled = os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true"
+    announcement_page = None
     private_address = address_json()
     if private_address:
         try:
             from alerts import fetch_address_status
             from event_scope import house_scope_from_secret
             regional_scope = house_scope_from_secret(private_address)
-            house = await fetch_address_status(private_address)
+            if announcements_enabled and regional_scope is not None:
+                house, announcement_page = await asyncio.gather(
+                    fetch_address_status(private_address),
+                    asyncio.to_thread(fetch_official_page),
+                    return_exceptions=True,
+                )
+                if isinstance(house, BaseException):
+                    raise house
+            else:
+                house = await fetch_address_status(private_address)
             identifiers = house.group_ids if house is not None else None
             try:
                 house_groups, address_source = await confirm_address_groups(identifiers, now)
@@ -995,11 +1007,15 @@ async def _once():
             persist()
 
     # Official emergency and GAV announcements are prioritized.
-    if (address_ok or regional_scope is not None) and os.getenv("ANNOUNCEMENTS_ENABLED", "true").lower() == "true":
+    if (address_ok or regional_scope is not None) and announcements_enabled:
         try:
-            from alerts import fetch_official_page, region_candidates
+            from alerts import region_candidates
+            if isinstance(announcement_page, BaseException):
+                raise announcement_page
+            if announcement_page is None:
+                announcement_page = await asyncio.to_thread(fetch_official_page)
             events = region_candidates(
-                fetch_official_page(), state, now, scope=regional_scope
+                announcement_page, state, now, scope=regional_scope
             )
             for post_id, key, value, message in events:
                 if key.startswith("official:unresolved:"):
