@@ -1,5 +1,7 @@
 name: Python tests
 on:
+  pull_request:
+    branches: [main]
   push:
     paths:
       - source_registry.py

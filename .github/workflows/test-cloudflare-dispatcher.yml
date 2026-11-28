@@ -1,5 +1,7 @@
 name: Test Cloudflare dispatcher and independent watchdog
 on:
+  pull_request:
+    branches: [main]
   push:
     paths:
       - deploy/cloudflare-dispatcher/**
