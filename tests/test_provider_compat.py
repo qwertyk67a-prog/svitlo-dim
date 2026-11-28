@@ -507,3 +507,16 @@ def test_directory_matches_complete_catalog_subgroup(field):
 def test_directory_preserves_unrecognized_labels_for_rejection(field):
     raw = {"data": {"12/Б": {"sub_type_reason": [field]}}}
     assert get_house_entry(parse_homes(raw, TEST_CONFIG), "12Б").group_ids == [field]
+
+
+def test_current_address_event_is_independent_of_row_order():
+    from provider_transport import parse_homes
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("Europe/Kyiv"))
+    def event(hours):
+        return {"start_date": (now + timedelta(hours=hours)).strftime("%d.%m.%Y %H:%M"),
+                "end_date": (now + timedelta(hours=hours + 2)).strftime("%d.%m.%Y %H:%M")}
+    past, current, future = map(event, [-5, -1, 3])
+    for rows in ([past, future, current], [future, current, past]):
+        assert parse_homes({"data": {"1": rows}}).houses["1"].start_date == current["start_date"]

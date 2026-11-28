@@ -64,7 +64,9 @@ def compact_daily_message(day, spans, *, group=None, conditional=False):
         times = [f"{clock(a)}–{clock(b)}" for a, b, status in spans
                  if conditional or status == mode]
         if times:
-            lines.extend([label + ":", *times])
+            if mode == "maybe" or group is not None:
+                lines.append(label + ":")
+            lines.extend(times)
     return "\n".join(lines)
 
 
@@ -210,7 +212,7 @@ def address_notice_with_schedule(value, now, source, groups, conditional):
                 body = body.removeprefix("Відключення:\n")
                 if len(groups) > 1:
                     body = header.partition(" · ")[2] + "\n" + body
-                message += "\n\nДалі за графіком:\n" + body
+                message += "\n" + body
     return message
 
 
@@ -1374,9 +1376,9 @@ async def _once():
              "Сповіщень, які були б надіслані" if dry_run else "Нових сповіщень",
              sent, len(problems))
     pin_enabled = os.getenv("TELEGRAM_SCHEDULE_BOARD") == "true"
-    now_enabled = os.getenv("NOW_COMMAND_ENABLED", str(pin_enabled).lower()) == "true"
+    now_enabled = os.getenv("NOW_COMMAND_ENABLED", "false") == "true"
     menus_enabled = os.getenv("PERSONAL_SUBSCRIPTIONS_ENABLED") == "true"
-    if not dry_run and (pin_enabled or now_enabled or menus_enabled):
+    if not dry_run and (pin_enabled and address_ok or now_enabled or menus_enabled):
         from schedule_board import APIError, api, answer_commands, build_board, quiet, update_pin
         configured_chat = str(chat)
         def call(method, **params):
@@ -1406,9 +1408,6 @@ async def _once():
                 state.pop(name, None)
             state["board:owner"] = owner
         cache = state.setdefault("board:cache", {})
-        if not address_ok and state.get("board:daily"):
-            old_group = state["board:daily"]["group"]
-            _, shared_text, _ = resident_plan(state, None, old_group, (None, None), now, False)
         board = shared_text if shared_daily or shared_text else build_board(cache, source, house_groups, now, uncertain_gpv, house,
                             "address_lookup" not in source_problems, parse_verified, compact_daily_message,
                             include_week=weekly_mode == "combined",
@@ -1432,6 +1431,8 @@ async def _once():
         persist()
         pin_result = "unknown"
         actions = ([update_pin] if pin_enabled and address_ok and pin_text and "resident_plan" not in problems else []) + ([answer_commands] if now_enabled or menus_enabled else [])
+        if not address_ok:
+            board = "Чергу будинку не підтверджено. Актуальний графік недоступний."
         board = board or "Підтверджений графік недоступний"
         for action in actions:
             try:

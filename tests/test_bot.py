@@ -360,3 +360,16 @@ def test_weekly_forecast_digest_is_not_clock_dependent():
     assert fingerprint(first[1]) == fingerprint(
         next(row for row in candidates(src) if row[2] == "week")[1]
     )
+
+
+def test_address_notice_combines_confirmed_hours_on_one_day():
+    now = datetime(2026, 11, 28, 6, 51, tzinfo=KYIV)
+    record = {"status": "active", "start": "28.11.2026 04:11", "end": "28.11.2026 07:30"}
+    labels = dict(enumerate(("00-04", "04:00-07:30", "07:30-13:00", "13:00-16:30",
+                             "16:30-22:00", "22-24")))
+    slots = {str(key): "no" if key % 2 else "yes" for key in labels}
+    labels = {str(key): value for key, value in labels.items()}
+    source = fake_source({now.date(): {GROUP: slots}})
+    source.preset.time_zone = labels
+    assert address_notice_with_schedule(record, now, source, [GROUP], False) == (
+        "28.11.2026\n04:11–07:30\n13:00–16:30\n22:00–24:00")

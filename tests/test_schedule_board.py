@@ -79,7 +79,7 @@ def test_invalid_table_keeps_cache_and_rollover_removes_yesterday():
     cache = {}
     def render(day):
         return build_board(cache,source,["q"],day,False,None,True,parse_verified,compact_daily_message)
-    assert render(now) == "23.11.2026\nВідключення:\n00:00–12:00"
+    assert render(now) == "23.11.2026\n00:00–12:00"
     source.fact.days[stamp]["q"] = {"1":"yes"}
     assert "00:00–12:00\nОстанні збережені дані" in render(now)
     assert "00:00–12:00" not in render(now.replace(day=24))
@@ -99,7 +99,7 @@ def test_combined_week_respects_facts_stale_forecast_and_sunday_boundary():
                            parse_verified, compact_daily_message, include_week=week)
     text = render(source)
     assert text.count("25.11.2026") == 1
-    assert "25.11.2026\nВідключення:\n12:00–24:00" in text
+    assert "25.11.2026\n12:00–24:00" in text
     assert "\n\n26.11.2026\n00:00–12:00\n\n27.11.2026" in text
     assert "Тижневий" not in text
     assert "30.11.2026" not in text
@@ -123,7 +123,7 @@ def test_combined_board_omits_empty_weekend_and_address_footer():
     def render():
         return build_board(cache, source, ["q"], now, False, address, True,
                            parse_verified, compact_daily_message, include_week=True)
-    expected = "27.11.2026\nВідключення:\n10:00–16:30\n19:00–22:30"
+    expected = "27.11.2026\n10:00–16:30\n19:00–22:30"
     assert render() == expected
     address.end_date = "27.11.2026 23:45"
     assert render() == expected

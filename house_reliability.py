@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from power_config import official_site, operator_label
 
 KYIV = ZoneInfo("Europe/Kyiv")
-ALLOWED = (5, 15, 17, 30, 60)
+ALLOWED = (5, 15, 17, 20, 30, 60)
 GRACE_SECONDS = 360
 
 
@@ -25,10 +25,10 @@ def parse_reminder_minutes(raw: str | None) -> tuple[int, ...]:
         return ()
     parts = [p.strip() for p in str(raw).split(",")]
     if not parts or any(not re.fullmatch(r"\d{1,2}", p) for p in parts):
-        raise ValueError("REMINDER_MINUTES: дозволено лише 0 або 5,15,17,30,60")
+        raise ValueError("REMINDER_MINUTES: дозволено лише 0 або 5,15,17,20,30,60")
     values = [int(p) for p in parts]
     if any(x not in ALLOWED for x in values):
-        raise ValueError("REMINDER_MINUTES: дозволено лише 0 або 5,15,17,30,60")
+        raise ValueError("REMINDER_MINUTES: дозволено лише 0 або 5,15,17,20,30,60")
     return tuple(sorted(set(values), reverse=True))
 
 
