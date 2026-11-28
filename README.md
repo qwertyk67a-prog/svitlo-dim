@@ -166,9 +166,9 @@ The private watchdog reports two consecutive failed schedule-pin checks separate
 
 ### House delivery settings
 
-The scheduled installation uses the Actions variable `REMINDER_MINUTES` (17 when unset).
+The scheduled installation uses the Actions variable `REMINDER_MINUTES` (20 when unset).
 Set it to 0 to disable. The former Actions secret of the same name no longer controls this workflow.
-The pin and /now can be switched independently through TELEGRAM_SCHEDULE_BOARD and NOW_COMMAND_ENABLED (both default on in Actions).
+The pin and /now can be switched independently through TELEGRAM_SCHEDULE_BOARD and NOW_COMMAND_ENABLED (the board defaults on and /now defaults off).
 Local executions still use the environment setting and default to 0.
 
 `PERSONAL_SUBSCRIPTIONS_ENABLED=true` enables the private Telegram command /subscriptions.

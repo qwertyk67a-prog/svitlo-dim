@@ -6,6 +6,9 @@ An installation can also select field-mapped JSON feeds.
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from contextlib import contextmanager
+from time import monotonic
+
 import base64
 import logging
 import re
@@ -19,6 +22,15 @@ from curl_cffi.requests import AsyncSession
 
 LOG = logging.getLogger("power-transport")
 AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
+@contextmanager
+def provider_timing(operation):
+    started = monotonic()
+    try:
+        yield
+    finally:
+        LOG.info("Provider timing %s %.0f ms", operation, (monotonic() - started) * 1000)
 
 
 class DaySlots:
@@ -112,6 +124,27 @@ def catalog_queue(value, config):
     return matches[0] if len(matches) == 1 else value
 
 
+def select_house_event(records):
+    if len(records) == 1:
+        return records[0]
+    from alerts import exact_provider_time
+    now = datetime.now(ZoneInfo("Europe/Kyiv"))
+    def priority(row):
+        start = exact_provider_time(row.get("start_date"))
+        end = exact_provider_time(row.get("end_date"))
+        # Prefer a current window, then the nearest future event, then incomplete or ended events.
+        if start and start <= now and (not end or now < end):
+            return 0, -start.timestamp()
+        if start and start > now and (not end or end >= start):
+            return 1, start.timestamp()
+        if end and end <= now:
+            return 3, -end.timestamp()
+        return 2, 0
+    events = [row for row in records if any(row.get(k) for k in ("start_date", "end_date", "sub_type"))]
+    return min(events, key=lambda row: (*priority(row), *(str(row.get(k) or "") for k in
+               ("start_date", "end_date", "sub_type", "type"))), default={})
+
+
 def parse_homes(raw, config=None):
     if not isinstance(raw, dict) or not isinstance(raw.get("data"), (dict, list)):
         raise RuntimeError("Invalid provider address directory")
@@ -143,10 +176,7 @@ def parse_homes(raw, config=None):
                         group = catalog_queue(group, config)
                         if group not in groups:
                             groups.append(group)
-        primary = next(
-            (row for row in records if row.get("sub_type") or row.get("start_date")),
-            records[0],
-        )
+        primary = select_house_event(records)
         homes[str(number)] = SimpleNamespace(
             group_ids=groups,
             sub_type=str(primary.get("sub_type") or ""),
@@ -265,9 +295,10 @@ async def _request(config, form, *, cookies=None, csrf=None):
         if not token:
             raw_token = _csrf_token_from_cookies(session.cookies, cookies)
             if not raw_token:
-                probe = await session.post(
-                    config["ajax_url"], data={"method": "getHomeNum"},
-                )
+                with provider_timing("csrf"):
+                    probe = await session.post(
+                        config["ajax_url"], data={"method": "getHomeNum"},
+                    )
                 if probe.status_code == 429:
                     raise ProviderRateLimit("Official source rate limited requests")
                 raw_token = _csrf_token_from_cookies(
@@ -277,24 +308,27 @@ async def _request(config, form, *, cookies=None, csrf=None):
                 token = _mask_csrf(raw_token)
             else:
                 raise RuntimeError("Official source did not provide a CSRF token")
-        response = await session.post(
-            config["ajax_url"], data=form,
-            headers={**headers, "X-CSRF-Token": token},
-        )
+        with provider_timing(form["method"]):
+            response = await session.post(
+                config["ajax_url"], data=form,
+                headers={**headers, "X-CSRF-Token": token},
+            )
         if response.status_code == 400:
             # A rejected or expired token can be refreshed once.
-            probe = await session.post(
-                config["ajax_url"], data={"method": "getHomeNum"},
-            )
+            with provider_timing("csrf"):
+                probe = await session.post(
+                    config["ajax_url"], data={"method": "getHomeNum"},
+                )
             if probe.status_code == 429:
                 raise ProviderRateLimit("Official source rate limited requests")
             new_raw = _csrf_token_from_cookies(probe.cookies, session.cookies)
             if not new_raw:
                 raise RuntimeError("Official source rejected CSRF refresh")
-            response = await session.post(
-                config["ajax_url"], data=form,
-                headers={**headers, "X-CSRF-Token": _mask_csrf(new_raw)},
-            )
+            with provider_timing(form["method"]):
+                response = await session.post(
+                    config["ajax_url"], data=form,
+                    headers={**headers, "X-CSRF-Token": _mask_csrf(new_raw)},
+                )
         return _checked_response(response)
 
 
@@ -333,7 +367,8 @@ async def ajax_post(config, form):
     except Exception as exc:
         LOG.warning("Direct provider request failed (%s), using browser",
                     type(exc).__name__)
-    cookies, csrf = await browser_cookies(config["site_url"])
+    with provider_timing("browser"):
+        cookies, csrf = await browser_cookies(config["site_url"])
     try:
         result = await _request(config, form, cookies=cookies, csrf=csrf)
     except ProviderRateLimit:
@@ -356,7 +391,8 @@ async def ajax_post(config, form):
 async def _read_json(url):
     try:
         async with AsyncSession(timeout=22) as session:
-            response = await session.get(url, allow_redirects=False)
+            with provider_timing("json"):
+                response = await session.get(url, allow_redirects=False)
             if response.status_code == 429:
                 raise ProviderRateLimit("Official source rate limited requests")
             if response.status_code != 200:

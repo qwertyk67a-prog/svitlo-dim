@@ -492,10 +492,11 @@ def fetch_official_page():
     feed = provider_config()["telegram_feed"]
     if not feed:
         raise RuntimeError("Офіційний Telegram-канал оператора не налаштовано")
-    response = requests.get(
-        feed, timeout=22,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; SVITLO/1.0)"},
-    )
+    from provider_transport import provider_timing
+    with provider_timing("announcements"):
+        response = requests.get(
+            feed, timeout=22, headers={"User-Agent": "Mozilla/5.0 (compatible; SVITLO/1.0)"},
+        )
     response.raise_for_status()
     return response.text
 

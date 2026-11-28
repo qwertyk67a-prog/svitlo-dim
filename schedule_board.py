@@ -86,7 +86,7 @@ def build_board(cache, source, groups, now, conditional, address, reliable, pars
         for stamp, rows in source.fact.days.items():
             daily[datetime.fromtimestamp(int(stamp), KYIV).date()] = rows
     corrected_window = None
-    if corrected_address and address:
+    if (corrected_address or include_week and len(groups) == 1) and address:
         from alerts import exact_provider_time
         start, end = exact_provider_time(address.start_date), exact_provider_time(address.end_date)
         if start and end and start <= now < end:
